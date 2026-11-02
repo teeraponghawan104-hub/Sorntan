@@ -149,9 +149,9 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
     absentTeacher && (absentTeacher.id === 100 || absentTeacher.id === 101);
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-[420px_1fr] gap-5 items-start">
+    <div className="grid grid-cols-1 lg:grid-cols-[420px_1fr] gap-4 sm:gap-5 items-start w-full">
       {/* แผงตั้งค่าและจัดคาบสอนแทนด้านซ้าย */}
-      <section className="bg-white dark:bg-[#14204a] border border-[#c9d4ec] dark:border-[#2a3a6e] rounded-xl p-5 shadow-xs print:hidden">
+      <section className="min-w-0 w-full bg-white dark:bg-[#14204a] border border-[#c9d4ec] dark:border-[#2a3a6e] rounded-xl p-4 sm:p-5 shadow-xs print:hidden">
         <div className="flex items-center justify-between gap-2 mb-3">
           <h2 className="text-xl font-bold text-[#0f2150] dark:text-[#e9eefc]">
             จัดครูสอนแทน
@@ -179,7 +179,7 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
           id="ta"
           value={selectedTeacherId}
           onChange={(e) => onChangeTeacherId(e.target.value)}
-          className="w-full px-3 py-2 rounded-lg border border-[#c9d4ec] dark:border-[#2a3a6e] bg-white dark:bg-[#0b1330] text-[#0f2150] dark:text-[#e9eefc] font-medium focus:outline-2 focus:outline-[#f2c230]"
+          className="w-full max-w-full px-3 py-2 rounded-lg border border-[#c9d4ec] dark:border-[#2a3a6e] bg-white dark:bg-[#0b1330] text-[#0f2150] dark:text-[#e9eefc] font-medium focus:outline-2 focus:outline-[#f2c230]"
         >
           <option value="">— เลือกครูผู้สอน —</option>
           {DEPARTMENT_GROUPS.map((group) => {
@@ -216,22 +216,19 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
           id="dt"
           value={selectedDate}
           onChange={(e) => onChangeDate(e.target.value)}
-          className="w-full px-3 py-2 rounded-lg border border-[#c9d4ec] dark:border-[#2a3a6e] bg-white dark:bg-[#0b1330] text-[#0f2150] dark:text-[#e9eefc] font-medium focus:outline-2 focus:outline-[#f2c230]"
+          className="block w-full max-w-full min-w-0 appearance-none px-3 py-2 rounded-lg border border-[#c9d4ec] dark:border-[#2a3a6e] bg-white dark:bg-[#0b1330] text-[#0f2150] dark:text-[#e9eefc] font-medium focus:outline-2 focus:outline-[#f2c230]"
         />
 
-        {/* ปุ่มลัดเลือกวันจันทร์-ศุกร์ */}
-        <div className="flex items-center gap-1.5 mt-2">
-          <span className="text-xs text-[#51608a] dark:text-[#9fb0dc] shrink-0">
-            เลือกวันในสัปดาห์:
-          </span>
+        {/* ปุ่มลัดเลือกวันจันทร์-ศุกร์ (จัดเรียง 5 ช่องเท่ากันในแถวเดียว ไม่ตกบรรทัดบนมือถือ) */}
+        <div className="grid grid-cols-5 gap-1.5 mt-2">
           {DAYS.map((dayName, idx) => (
             <button
               key={dayName}
               type="button"
               onClick={() => jumpToWeekday(idx)}
-              className={`px-2.5 py-1 rounded text-xs font-semibold transition-colors cursor-pointer whitespace-nowrap ${
+              className={`py-1.5 px-1 rounded-md text-xs font-semibold text-center transition-colors cursor-pointer whitespace-nowrap ${
                 dayIdx === idx
-                  ? "bg-[#1b4fb8] text-white"
+                  ? "bg-[#1b4fb8] text-white shadow-2xs"
                   : "bg-[#eaf0fa] dark:bg-[#0b1330] text-[#0f2150] dark:text-[#9fb0dc] hover:bg-blue-200 dark:hover:bg-blue-900"
               }`}
             >
@@ -363,15 +360,15 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                     key={slot.p}
                     className="border-t border-dashed border-[#c9d4ec] dark:border-[#2a3a6e] pt-2.5 grid gap-1.5"
                   >
-                    <div className="flex items-center justify-between text-base">
-                      <span>
+                    <div className="flex items-center justify-between gap-2 text-sm sm:text-base">
+                      <span className="min-w-0">
                         <b>คาบที่ {slot.p + 1}</b> ({slot.tm}) ·{" "}
                         <span className="font-semibold text-[#1b4fb8] dark:text-[#6c97ff]">
                           {slot.code}
                         </span>{" "}
                         ชั้น <b>{slot.cls}</b>
                       </span>
-                      <span className="text-xs text-[#51608a] dark:text-[#9fb0dc]">
+                      <span className="text-xs text-[#51608a] dark:text-[#9fb0dc] whitespace-nowrap shrink-0">
                         {formatRoomLabel(slot.room)}
                       </span>
                     </div>
@@ -381,7 +378,7 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                       aria-label={`ครูสอนแทนคาบ ${slot.p + 1}`}
                       value={assignments[slot.p] || "s"}
                       onChange={(e) => onChangeAssignment(slot.p, e.target.value)}
-                      className="w-full px-2.5 py-1.5 rounded-md border border-[#c9d4ec] dark:border-[#2a3a6e] bg-white dark:bg-[#0b1330] text-[#0f2150] dark:text-[#e9eefc] text-base focus:outline-2 focus:outline-[#f2c230]"
+                      className="w-full max-w-full px-2.5 py-1.5 rounded-md border border-[#c9d4ec] dark:border-[#2a3a6e] bg-white dark:bg-[#0b1330] text-[#0f2150] dark:text-[#e9eefc] text-sm sm:text-base focus:outline-2 focus:outline-[#f2c230]"
                     >
                       {sameGroupRegular.length > 0 && (
                         <optgroup label={`★ ครูกลุ่มสาระเดียวกันที่ว่าง (${sameGroupRegular.length} ท่าน)`}>
@@ -451,20 +448,20 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
       </section>
 
       {/* แผงแสดงตัวอย่างเอกสารใบสอนแทน (A4) ด้านขวา */}
-      <section className="bg-white dark:bg-[#14204a] border border-[#c9d4ec] dark:border-[#2a3a6e] rounded-xl p-5 shadow-xs">
-        <div className="flex flex-wrap items-center justify-between gap-3 mb-3 print:hidden">
+      <section className="min-w-0 w-full bg-white dark:bg-[#14204a] border border-[#c9d4ec] dark:border-[#2a3a6e] rounded-xl p-4 sm:p-5 shadow-xs">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3 print:hidden">
           <h2 className="text-xl font-bold text-[#0f2150] dark:text-[#e9eefc]">
             ตัวอย่างเอกสารใบสอนแทน
           </h2>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2">
             <button
               type="button"
               id="bw"
               disabled={!canExport || isExporting}
               onClick={() => handleExport("word")}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[#1b4fb8] hover:bg-[#153e91] disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold text-base transition-colors cursor-pointer whitespace-nowrap"
+              className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-[#1b4fb8] hover:bg-[#153e91] disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold text-sm sm:text-base transition-colors cursor-pointer whitespace-nowrap"
             >
-              <FileText className="w-4 h-4" />
+              <FileText className="w-4 h-4 shrink-0" />
               <span>ดาวน์โหลด Word</span>
             </button>
             <button
@@ -472,9 +469,9 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
               id="bp"
               disabled={!canExport || isExporting}
               onClick={() => handleExport("pdf")}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[#1b4fb8] hover:bg-[#153e91] disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold text-base transition-colors cursor-pointer whitespace-nowrap"
+              className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-[#1b4fb8] hover:bg-[#153e91] disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold text-sm sm:text-base transition-colors cursor-pointer whitespace-nowrap"
             >
-              <FileDown className="w-4 h-4" />
+              <FileDown className="w-4 h-4 shrink-0" />
               <span>ดาวน์โหลด PDF</span>
             </button>
             <button
@@ -482,18 +479,18 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
               id="bi"
               disabled={!canExport || isExporting}
               onClick={() => handleExport("image")}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-[#1b4fb8] dark:border-[#6c97ff] text-[#1b4fb8] dark:text-[#6c97ff] hover:bg-[#eaf0fa] dark:hover:bg-blue-950 disabled:opacity-40 disabled:cursor-not-allowed font-semibold text-base transition-colors cursor-pointer whitespace-nowrap"
+              className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-[#1b4fb8] dark:border-[#6c97ff] text-[#1b4fb8] dark:text-[#6c97ff] hover:bg-[#eaf0fa] dark:hover:bg-blue-950 disabled:opacity-40 disabled:cursor-not-allowed font-semibold text-sm sm:text-base transition-colors cursor-pointer whitespace-nowrap"
             >
-              <ImageIcon className="w-4 h-4" />
+              <ImageIcon className="w-4 h-4 shrink-0" />
               <span>ดาวน์โหลดรูปภาพ</span>
             </button>
             <button
               type="button"
               disabled={!canExport || isExporting}
               onClick={handlePrint}
-              className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-[#c9d4ec] dark:border-[#2a3a6e] text-[#0f2150] dark:text-[#e9eefc] hover:bg-slate-100 dark:hover:bg-blue-950 disabled:opacity-40 disabled:cursor-not-allowed font-semibold text-base transition-colors cursor-pointer whitespace-nowrap"
+              className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-[#c9d4ec] dark:border-[#2a3a6e] text-[#0f2150] dark:text-[#e9eefc] hover:bg-slate-100 dark:hover:bg-blue-950 disabled:opacity-40 disabled:cursor-not-allowed font-semibold text-sm sm:text-base transition-colors cursor-pointer whitespace-nowrap"
             >
-              <Printer className="w-4 h-4" />
+              <Printer className="w-4 h-4 shrink-0" />
               <span>พิมพ์</span>
             </button>
           </div>

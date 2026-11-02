@@ -78,7 +78,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-[#eaf0fa] dark:bg-[#0b1330] text-[#0f2150] dark:text-[#e9eefc] transition-colors">
+    <div className="min-h-screen w-full overflow-x-hidden bg-[#eaf0fa] dark:bg-[#0b1330] text-[#0f2150] dark:text-[#e9eefc] transition-colors">
       <Header
         activeTab={activeTab}
         onSelectTab={(tab) => {
@@ -89,7 +89,7 @@ export default function App() {
         onToggleDarkMode={() => setDarkMode((d) => !d)}
       />
 
-      <main className="max-w-[1360px] mx-auto p-4 md:p-5">
+      <main className="max-w-[1360px] mx-auto p-3 sm:p-4 md:p-5">
         {activeTab === "planner" && (
           <SubstitutePlanner
             selectedTeacherId={selectedTeacherId}
