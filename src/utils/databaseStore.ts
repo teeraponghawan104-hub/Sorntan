@@ -17,43 +17,82 @@ import {
   hydrateTeacherSchedule,
   setRuntimeTeachers,
 } from "../data/teachers";
-import { OperationType, auth, db, handleFirestoreError } from "../firebase";
+import { OperationType, db, handleFirestoreError } from "../firebase";
 
 const LOCAL_TEACHERS_KEY = "worakhun_teachers_db_v2";
 const LOCAL_RECORDS_KEY = "worakhun_sub_records_db_v2";
+const LOCAL_PLANNER_STATE_KEY = "worakhun_live_planner_v2";
+
+export const SHARED_OWNER_ID = "worakhun_shared";
+export const LIVE_WORKSPACE_DOC_ID = "live_workspace";
 
 export interface SavedSubstituteRecord {
   recordId: string;
   absentTeacherId: number;
+  absentTeacherIds?: string[];
   absentTeacherName: string;
   absentTeacherGroup: string;
   selectedDate: string;
   reason: string;
   studentTeacherName: string;
   includeSupervision: boolean;
-  assignments: Record<number, string>;
+  assignments: Record<string, string>;
   updatedAtIso: string;
 }
 
-export function encodeAssignments(assignments: Record<number, string>): string {
-  return Object.entries(assignments)
-    .filter(([, val]) => Boolean(val))
-    .map(([k, v]) => `${k}:${v}`)
-    .join(",")
-    .slice(0, 400);
+export interface LivePlannerWorkspaceState {
+  absentTeacherIds: string[];
+  selectedDate: string;
+  reason: string;
+  studentTeacherName: string;
+  includeSupervision: boolean;
+  assignments: Record<string, string>;
+  clientWriteId?: string;
 }
 
-export function decodeAssignments(assignmentsJson: string): Record<number, string> {
-  const result: Record<number, string> = {};
-  if (!assignmentsJson) return result;
-  assignmentsJson.split(",").forEach((pair) => {
-    const [k, v] = pair.split(":");
-    const pIdx = Number(k);
-    if (!Number.isNaN(pIdx) && v) {
-      result[pIdx] = v.trim();
+export function encodeAssignments(
+  assignments: Record<string, string>,
+  absentTeacherIds?: string[],
+  clientWriteId?: string
+): string {
+  const parts: string[] = [];
+  if (absentTeacherIds && absentTeacherIds.length > 0) {
+    parts.push(`_t:${absentTeacherIds.join("+")}`);
+  }
+  if (clientWriteId) {
+    parts.push(`_c:${clientWriteId.replace(/[,:|]/g, "")}`);
+  }
+  Object.entries(assignments).forEach(([k, v]) => {
+    if (k !== "_t" && k !== "_c" && v) {
+      parts.push(`${k}:${v}`);
     }
   });
-  return result;
+  return parts.join(",").slice(0, 2000);
+}
+
+export function decodeAssignments(assignmentsJson: string): {
+  assignments: Record<string, string>;
+  absentTeacherIds?: string[];
+  clientWriteId?: string;
+} {
+  const assignments: Record<string, string> = {};
+  let absentTeacherIds: string[] | undefined;
+  let clientWriteId: string | undefined;
+  if (!assignmentsJson) return { assignments };
+  assignmentsJson.split(",").forEach((pair) => {
+    const [k, v] = pair.split(":");
+    if (!k || !v) return;
+    const cleanKey = k.trim();
+    const cleanVal = v.trim();
+    if (cleanKey === "_t") {
+      absentTeacherIds = cleanVal.split("+").filter(Boolean);
+    } else if (cleanKey === "_c") {
+      clientWriteId = cleanVal;
+    } else {
+      assignments[cleanKey] = cleanVal;
+    }
+  });
+  return { assignments, absentTeacherIds, clientWriteId };
 }
 
 /**
@@ -72,7 +111,6 @@ export function sanitizeTeacherPayload(raw: TeacherRecord): TeacherRecord {
     .slice(0, 15);
   const cleanOther = String(raw.otherSummary || "").trim().slice(0, 300);
 
-  // Rebuild s from d if d is provided, otherwise normalize s
   let scheduleStr = raw.s || "";
   if (Array.isArray(raw.d) && raw.d.length === 5) {
     scheduleStr = raw.d
@@ -104,6 +142,9 @@ export function sanitizeTeacherPayload(raw: TeacherRecord): TeacherRecord {
 
 export function loadLocalTeachers(): TeacherRecord[] {
   try {
+    if (typeof localStorage === "undefined") {
+      return setRuntimeTeachers(INITIAL_TEACHERS);
+    }
     const raw = localStorage.getItem(LOCAL_TEACHERS_KEY);
     if (!raw) {
       return setRuntimeTeachers(INITIAL_TEACHERS);
@@ -119,9 +160,13 @@ export function loadLocalTeachers(): TeacherRecord[] {
 }
 
 export function saveLocalTeachers(teachers: TeacherRecord[]): TeacherRecord[] {
-  const updated = setRuntimeTeachers(teachers.map((t) => sanitizeTeacherPayload(t)));
+  const updated = setRuntimeTeachers(
+    teachers.map((t) => sanitizeTeacherPayload(t)).sort((a, b) => a.id - b.id)
+  );
   try {
-    localStorage.setItem(LOCAL_TEACHERS_KEY, JSON.stringify(updated));
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(LOCAL_TEACHERS_KEY, JSON.stringify(updated));
+    }
   } catch {
     // Ignore storage quota errors
   }
@@ -130,6 +175,7 @@ export function saveLocalTeachers(teachers: TeacherRecord[]): TeacherRecord[] {
 
 export function loadLocalSubstituteRecords(): SavedSubstituteRecord[] {
   try {
+    if (typeof localStorage === "undefined") return [];
     const raw = localStorage.getItem(LOCAL_RECORDS_KEY);
     if (!raw) return [];
     const parsed = JSON.parse(raw) as SavedSubstituteRecord[];
@@ -141,19 +187,49 @@ export function loadLocalSubstituteRecords(): SavedSubstituteRecord[] {
 
 export function saveLocalSubstituteRecords(records: SavedSubstituteRecord[]): void {
   try {
-    localStorage.setItem(LOCAL_RECORDS_KEY, JSON.stringify(records));
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(LOCAL_RECORDS_KEY, JSON.stringify(records));
+    }
   } catch {
     // Ignore storage quota errors
   }
 }
 
-export function getTeacherDocId(uid: string, teacherId: number): string {
-  const safeUid = uid.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 80);
-  return `u_${safeUid}_t_${teacherId}`;
+export function loadLocalPlannerState(): LivePlannerWorkspaceState | null {
+  try {
+    if (typeof localStorage === "undefined") return null;
+    const raw = localStorage.getItem(LOCAL_PLANNER_STATE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as LivePlannerWorkspaceState;
+    if (
+      !parsed ||
+      !Array.isArray(parsed.absentTeacherIds) ||
+      typeof parsed.selectedDate !== "string"
+    ) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export function saveLocalPlannerState(state: LivePlannerWorkspaceState): void {
+  try {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(LOCAL_PLANNER_STATE_KEY, JSON.stringify(state));
+    }
+  } catch {
+    // Ignore storage quota errors
+  }
+}
+
+export function getTeacherDocId(teacherId: number): string {
+  return `t_${Math.max(1, Math.min(99999, Math.round(Number(teacherId) || 100)))}`;
 }
 
 /**
- * ซิงก์ข้อมูลครู 1 ท่าน (เพิ่มใหม่ หรือ แก้ไข) ลง Firestore และ LocalStorage
+ * ซิงก์ข้อมูลครู 1 ท่าน (เพิ่มใหม่ หรือ แก้ไข) ลง Firestore ฐานข้อมูลกลาง และ LocalStorage ทันทีโดยไม่ต้องล็อกอิน
  */
 export async function upsertTeacherInDatabase(
   teacher: TeacherRecord,
@@ -167,15 +243,98 @@ export async function upsertTeacherInDatabase(
 
   const savedLocal = saveLocalTeachers(nextList);
 
-  const user = auth.currentUser;
-  if (user && user.emailVerified) {
-    const docId = getTeacherDocId(user.uid, clean.id);
-    const path = `teachers/${docId}`;
-    const docRef = doc(db, "teachers", docId);
-    try {
-      const existingSnap = await getDoc(docRef);
-      if (existingSnap.exists()) {
-        await updateDoc(docRef, {
+  const docId = getTeacherDocId(clean.id);
+  const path = `teachers/${docId}`;
+  const docRef = doc(db, "teachers", docId);
+  try {
+    const existingSnap = await getDoc(docRef);
+    if (existingSnap.exists()) {
+      await updateDoc(docRef, {
+        id: clean.id,
+        n: clean.n,
+        g: clean.g,
+        pdfGroup: clean.pdfGroup,
+        r: clean.r,
+        totalHours: clean.totalHours,
+        coursesSummary: clean.coursesSummary,
+        otherSummary: clean.otherSummary,
+        s: clean.s,
+        isStudentTeacher: Boolean(clean.isStudentTeacher),
+        updatedAt: serverTimestamp(),
+      });
+    } else {
+      await setDoc(docRef, {
+        id: clean.id,
+        n: clean.n,
+        g: clean.g,
+        pdfGroup: clean.pdfGroup,
+        r: clean.r,
+        totalHours: clean.totalHours,
+        coursesSummary: clean.coursesSummary,
+        otherSummary: clean.otherSummary,
+        s: clean.s,
+        isStudentTeacher: Boolean(clean.isStudentTeacher),
+        ownerId: SHARED_OWNER_ID,
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+      });
+    }
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+  }
+
+  return savedLocal;
+}
+
+/**
+ * ลบข้อมูลครูออกจากฐานข้อมูลกลาง Firestore และ LocalStorage ทันทีโดยไม่ต้องล็อกอิน
+ */
+export async function removeTeacherFromDatabase(
+  teacherId: number,
+  currentTeachers: TeacherRecord[]
+): Promise<TeacherRecord[]> {
+  const nextList = currentTeachers.filter((t) => t.id !== teacherId);
+  const savedLocal = saveLocalTeachers(nextList);
+
+  const docId = getTeacherDocId(teacherId);
+  const path = `teachers/${docId}`;
+  try {
+    await deleteDoc(doc(db, "teachers", docId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+
+  return savedLocal;
+}
+
+/**
+ * ซิงก์ข้อมูลครูทั้งหมดขึ้น Cloud Firestore ฐานข้อมูลกลาง (หรือกู้คืนค่าเริ่มต้น 31 ท่านจาก PDF)
+ */
+export async function syncAllTeachersToCloud(
+  teachersToSync: TeacherRecord[]
+): Promise<TeacherRecord[]> {
+  const savedLocal = saveLocalTeachers(teachersToSync);
+
+  const path = "teachers";
+  try {
+    const q = query(
+      collection(db, "teachers"),
+      where("ownerId", "==", SHARED_OWNER_ID)
+    );
+    const snap = await getDocs(q);
+    const existingIds = new Set<string>();
+    snap.forEach((d) => existingIds.add(d.id));
+
+    const batch = writeBatch(db);
+    const targetDocIds = new Set<string>();
+
+    savedLocal.forEach((t) => {
+      const clean = sanitizeTeacherPayload(t);
+      const docId = getTeacherDocId(clean.id);
+      targetDocIds.add(docId);
+      const ref = doc(db, "teachers", docId);
+      if (existingIds.has(docId)) {
+        batch.update(ref, {
           id: clean.id,
           n: clean.n,
           g: clean.g,
@@ -189,7 +348,7 @@ export async function upsertTeacherInDatabase(
           updatedAt: serverTimestamp(),
         });
       } else {
-        await setDoc(docRef, {
+        batch.set(ref, {
           id: clean.id,
           n: clean.n,
           g: clean.g,
@@ -200,88 +359,13 @@ export async function upsertTeacherInDatabase(
           otherSummary: clean.otherSummary,
           s: clean.s,
           isStudentTeacher: Boolean(clean.isStudentTeacher),
-          ownerId: user.uid,
+          ownerId: SHARED_OWNER_ID,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         });
       }
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, path);
-    }
-  }
-
-  return savedLocal;
-}
-
-/**
- * ลบข้อมูลครูออกจากฐานข้อมูล Firestore และ LocalStorage
- */
-export async function removeTeacherFromDatabase(
-  teacherId: number,
-  currentTeachers: TeacherRecord[]
-): Promise<TeacherRecord[]> {
-  const nextList = currentTeachers.filter((t) => t.id !== teacherId);
-  const savedLocal = saveLocalTeachers(nextList);
-
-  const user = auth.currentUser;
-  if (user && user.emailVerified) {
-    const docId = getTeacherDocId(user.uid, teacherId);
-    const path = `teachers/${docId}`;
-    try {
-      await deleteDoc(doc(db, "teachers", docId));
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, path);
-    }
-  }
-
-  return savedLocal;
-}
-
-/**
- * ซิงก์ข้อมูลครูทั้งหมดขึ้น Cloud Firestore (หรือกู้คืนค่าเริ่มต้น 31 ท่านจาก PDF)
- */
-export async function syncAllTeachersToCloud(
-  teachersToSync: TeacherRecord[]
-): Promise<TeacherRecord[]> {
-  const savedLocal = saveLocalTeachers(teachersToSync);
-  const user = auth.currentUser;
-  if (!user || !user.emailVerified) {
-    return savedLocal;
-  }
-
-  const path = "teachers";
-  try {
-    const q = query(collection(db, "teachers"), where("ownerId", "==", user.uid));
-    const snap = await getDocs(q);
-    const existingIds = new Set<string>();
-    snap.forEach((d) => existingIds.add(d.id));
-
-    const batch = writeBatch(db);
-    const targetDocIds = new Set<string>();
-
-    savedLocal.forEach((t) => {
-      const clean = sanitizeTeacherPayload(t);
-      const docId = getTeacherDocId(user.uid, clean.id);
-      targetDocIds.add(docId);
-      const ref = doc(db, "teachers", docId);
-      batch.set(ref, {
-        id: clean.id,
-        n: clean.n,
-        g: clean.g,
-        pdfGroup: clean.pdfGroup,
-        r: clean.r,
-        totalHours: clean.totalHours,
-        coursesSummary: clean.coursesSummary,
-        otherSummary: clean.otherSummary,
-        s: clean.s,
-        isStudentTeacher: Boolean(clean.isStudentTeacher),
-        ownerId: user.uid,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
     });
 
-    // ลบรายการที่ไม่อยู่ในชุดใหม่
     existingIds.forEach((oldDocId) => {
       if (!targetDocIds.has(oldDocId)) {
         batch.delete(doc(db, "teachers", oldDocId));
@@ -296,8 +380,86 @@ export async function syncAllTeachersToCloud(
   return savedLocal;
 }
 
+let cloudWriteChain: Promise<void> = Promise.resolve();
+
+function enqueueCloudWrite(task: () => Promise<void>): Promise<void> {
+  const next = cloudWriteChain.then(task, task);
+  cloudWriteChain = next.catch(() => {});
+  return next;
+}
+
 /**
- * บันทึกหรืออัปเดตใบสอนแทนลงฐานข้อมูล
+ * บันทึกหรืออัปเดตสถานะตารางจัดสอนแทนปัจจุบันลง Cloud Firestore อัตโนมัติ เพื่อให้ทุกคนเห็นตรงกันแบบเรียลไทม์
+ */
+export async function saveLiveWorkspaceToCloud(
+  state: LivePlannerWorkspaceState,
+  headerInfo?: { id: number; n: string; pdfGroup: string } | null
+): Promise<void> {
+  saveLocalPlannerState(state);
+
+  const absentTeacherId = Math.max(
+    1,
+    Math.min(
+      99999,
+      Math.round(Number(headerInfo?.id || state.absentTeacherIds[0] || 102))
+    )
+  );
+  const absentTeacherName = (headerInfo?.n || `ครูรหัส ${absentTeacherId}`)
+    .trim()
+    .slice(0, 300) || "-";
+  const absentTeacherGroup = (headerInfo?.pdfGroup || "ภาษาไทย")
+    .trim()
+    .slice(0, 150) || "-";
+  const selectedDate = (state.selectedDate || "2026-11-02").trim().slice(0, 20);
+  const reason = (state.reason || "ไปราชการ").trim().slice(0, 200) || "ไปราชการ";
+  const studentTeacherName = (state.studentTeacherName || "").trim().slice(0, 120);
+  const assignmentsJson = encodeAssignments(
+    state.assignments,
+    state.absentTeacherIds,
+    state.clientWriteId
+  );
+
+  const path = `substitute_records/${LIVE_WORKSPACE_DOC_ID}`;
+  const docRef = doc(db, "substitute_records", LIVE_WORKSPACE_DOC_ID);
+  await enqueueCloudWrite(async () => {
+    try {
+      const existingSnap = await getDoc(docRef);
+      if (existingSnap.exists()) {
+        await updateDoc(docRef, {
+          absentTeacherId,
+          absentTeacherName,
+          absentTeacherGroup,
+          selectedDate,
+          reason,
+          studentTeacherName,
+          includeSupervision: Boolean(state.includeSupervision),
+          assignmentsJson,
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        await setDoc(docRef, {
+          recordId: LIVE_WORKSPACE_DOC_ID,
+          absentTeacherId,
+          absentTeacherName,
+          absentTeacherGroup,
+          selectedDate,
+          reason,
+          studentTeacherName,
+          includeSupervision: Boolean(state.includeSupervision),
+          assignmentsJson,
+          ownerId: SHARED_OWNER_ID,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, path);
+    }
+  });
+}
+
+/**
+ * บันทึกหรืออัปเดตใบสอนแทนลงฐานข้อมูลกลางโดยไม่ต้องล็อกอิน
  */
 export async function upsertSubstituteRecordInDatabase(
   record: Omit<SavedSubstituteRecord, "updatedAtIso">,
@@ -310,8 +472,8 @@ export async function upsertSubstituteRecordInDatabase(
   const updatedItem: SavedSubstituteRecord = {
     ...record,
     recordId: cleanRecordId,
-    absentTeacherName: record.absentTeacherName.trim().slice(0, 120) || "-",
-    absentTeacherGroup: record.absentTeacherGroup.trim().slice(0, 60) || "-",
+    absentTeacherName: record.absentTeacherName.trim().slice(0, 300) || "-",
+    absentTeacherGroup: record.absentTeacherGroup.trim().slice(0, 150) || "-",
     selectedDate: record.selectedDate.trim().slice(0, 20),
     reason: (record.reason || "ไปราชการ").trim().slice(0, 200) || "ไปราชการ",
     studentTeacherName: (record.studentTeacherName || "").trim().slice(0, 120),
@@ -324,16 +486,14 @@ export async function upsertSubstituteRecordInDatabase(
   ];
   saveLocalSubstituteRecords(nextRecords);
 
-  const user = auth.currentUser;
-  if (user && user.emailVerified) {
-    const cloudDocId = `u_${user.uid.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 40)}_${cleanRecordId}`.slice(
-      0,
-      128
-    );
-    const path = `substitute_records/${cloudDocId}`;
-    const docRef = doc(db, "substitute_records", cloudDocId);
-    const assignmentsJson = encodeAssignments(updatedItem.assignments);
+  const path = `substitute_records/${cleanRecordId}`;
+  const docRef = doc(db, "substitute_records", cleanRecordId);
+  const assignmentsJson = encodeAssignments(
+    updatedItem.assignments,
+    updatedItem.absentTeacherIds
+  );
 
+  await enqueueCloudWrite(async () => {
     try {
       const existingSnap = await getDoc(docRef);
       if (existingSnap.exists()) {
@@ -350,7 +510,7 @@ export async function upsertSubstituteRecordInDatabase(
         });
       } else {
         await setDoc(docRef, {
-          recordId: cloudDocId,
+          recordId: cleanRecordId,
           absentTeacherId: updatedItem.absentTeacherId,
           absentTeacherName: updatedItem.absentTeacherName,
           absentTeacherGroup: updatedItem.absentTeacherGroup,
@@ -359,7 +519,7 @@ export async function upsertSubstituteRecordInDatabase(
           studentTeacherName: updatedItem.studentTeacherName,
           includeSupervision: Boolean(updatedItem.includeSupervision),
           assignmentsJson,
-          ownerId: user.uid,
+          ownerId: SHARED_OWNER_ID,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         });
@@ -367,32 +527,27 @@ export async function upsertSubstituteRecordInDatabase(
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, path);
     }
-  }
+  });
 
   return nextRecords;
 }
 
 /**
- * ลบประวัติใบสอนแทนออกจากฐานข้อมูล
+ * ลบประวัติใบสอนแทนออกจากฐานข้อมูลกลางโดยไม่ต้องล็อกอิน
  */
 export async function removeSubstituteRecordFromDatabase(
   recordId: string,
   currentRecords: SavedSubstituteRecord[]
 ): Promise<SavedSubstituteRecord[]> {
-  const nextRecords = currentRecords.filter((r) => r.recordId !== recordId);
+  const cleanId = recordId.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 128);
+  const nextRecords = currentRecords.filter((r) => r.recordId !== cleanId);
   saveLocalSubstituteRecords(nextRecords);
 
-  const user = auth.currentUser;
-  if (user && user.emailVerified) {
-    const cleanId = recordId.startsWith(`u_${user.uid.slice(0, 10)}`)
-      ? recordId
-      : `u_${user.uid.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 40)}_${recordId}`.slice(0, 128);
-    const path = `substitute_records/${cleanId}`;
-    try {
-      await deleteDoc(doc(db, "substitute_records", cleanId));
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, path);
-    }
+  const path = `substitute_records/${cleanId}`;
+  try {
+    await deleteDoc(doc(db, "substitute_records", cleanId));
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
   }
 
   return nextRecords;

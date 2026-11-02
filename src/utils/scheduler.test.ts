@@ -12,9 +12,14 @@ import {
   getDayIndex,
   parseScheduleCell,
   getTeacherClasses,
+  getCombinedTeacherClasses,
   getCandidateTeachers,
   autoAssignSubstitutes,
+  autoAssignCombinedSubstitutes,
+  autoAssignMultipleTeachers,
   buildDocumentRows,
+  buildCombinedDocumentRows,
+  buildCombinedTeacherHeader,
 } from "./scheduler";
 
 test("all 31 teachers (27 regular + 4 student teachers) from the 16-page PDF are loaded with 5x7 schedules", () => {
@@ -144,5 +149,88 @@ test("setRuntimeTeachers dynamically adds and removes teachers and updates subst
   setRuntimeTeachers(INITIAL_TEACHERS);
   assert.equal(TEACHERS.length, 31);
 });
+
+test("autoAssignMultipleTeachers prevents absent teachers from covering each other and prevents double-booking in the same period", () => {
+  const entries = autoAssignMultipleTeachers(
+    [
+      {
+        teacherId: "102",
+        reason: "ไปราชการ",
+        studentTeacherName: "",
+        includeSupervision: false,
+        assignments: {},
+      },
+      {
+        teacherId: "103",
+        reason: "อบรม/สัมมนา",
+        studentTeacherName: "",
+        includeSupervision: false,
+        assignments: {},
+      },
+    ],
+    "2026-11-02" // Monday
+  );
+
+  assert.equal(entries.length, 2);
+  const asg102 = entries[0].assignments;
+  const asg103 = entries[1].assignments;
+
+  // Neither 102 nor 103 should ever be assigned to cover the other
+  for (const v of Object.values(asg102)) {
+    assert.notEqual(v, "t102");
+    assert.notEqual(v, "t103");
+  }
+  for (const v of Object.values(asg103)) {
+    assert.notEqual(v, "t102");
+    assert.notEqual(v, "t103");
+  }
+
+  // On Monday Period 2 (0-indexed 1), both 102 and 103 have classes; they must not be assigned the same teacher
+  assert.ok(asg102[1]);
+  assert.ok(asg103[1]);
+  assert.notEqual(asg102[1], asg103[1]);
+});
+
+test("autoAssignCombinedSubstitutes and buildCombinedDocumentRows merge multiple absent teachers into ONE single table sorted by period", () => {
+  const teacherIds = ["102", "103"];
+  const dateStr = "2026-11-02"; // Monday
+
+  const slots = getCombinedTeacherClasses(teacherIds, dateStr);
+  // 102 has P1, P2, P4; 103 has P2, P3, P5 -> total 6 classes in the same table
+  assert.equal(slots.length, 6);
+  assert.deepEqual(
+    slots.map((s) => s.p + 1),
+    [1, 2, 2, 3, 4, 5]
+  );
+
+  const asg = autoAssignCombinedSubstitutes(teacherIds, dateStr);
+  // In Period 2 (0-indexed 1), both 102_1 and 103_1 are present and must NOT be assigned the same teacher
+  assert.ok(asg["102_1"]);
+  assert.ok(asg["103_1"]);
+  assert.notEqual(asg["102_1"], asg["103_1"]);
+
+  // Neither 102 nor 103 can be assigned in any slot
+  for (const val of Object.values(asg)) {
+    assert.notEqual(val, "t102");
+    assert.notEqual(val, "t103");
+  }
+
+  const rows = buildCombinedDocumentRows(teacherIds, dateStr, asg, "");
+  assert.equal(rows.length, 6);
+  assert.equal(rows[0].code, "ท33102"); // 102 P1
+  assert.equal(rows[1].code, "ท32102"); // 102 P2
+  assert.equal(rows[2].code, "ท31102"); // 103 P2
+  assert.notEqual(rows[1].n, rows[2].n); // P2 substitutes must be two different teachers
+
+  const header = buildCombinedTeacherHeader(teacherIds);
+  assert.ok(header);
+  assert.equal(
+    header.n,
+    "102 ครูรติพงษ์ รักษาพันธุ์, 103 ครูอมรรัตน์ สายเหนือ"
+  );
+  assert.equal(header.pdfGroup, "ภาษาไทย");
+});
+
+
 
 

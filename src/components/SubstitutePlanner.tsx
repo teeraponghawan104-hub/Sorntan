@@ -12,33 +12,43 @@ import {
   FolderOpen,
   Maximize2,
   X,
+  UserPlus,
+  Users,
 } from "lucide-react";
 import { SCHOOL_LOGO } from "../data/logo";
 import { DAYS, DEPARTMENT_GROUPS, TeacherRecord } from "../data/teachers";
 import {
-  buildDocumentRows,
+  buildCombinedDocumentRows,
+  buildCombinedTeacherHeader,
   formatRoomLabel,
   formatThaiDate,
   getCandidateTeachers,
+  getCombinedTeacherClasses,
   getDayIndex,
+  getSlotAssignment,
   getTeacherById,
   getTeacherClasses,
 } from "../utils/scheduler";
-import { exportSubstituteDocument, renderPaperToCanvas } from "../utils/exportDoc";
+import {
+  exportSubstituteDocument,
+  renderPaperToCanvas,
+} from "../utils/exportDoc";
 import { SavedSubstituteRecord } from "../utils/databaseStore";
 
 interface SubstitutePlannerProps {
   teachers: TeacherRecord[];
-  selectedTeacherId: string;
-  onChangeTeacherId: (id: string) => void;
+  absentTeacherIds: string[];
+  onChangePrimaryTeacherId: (id: string) => void;
+  onAddAbsentTeacher: (teacherId?: string) => void;
+  onRemoveAbsentTeacher: (teacherId: string) => void;
   selectedDate: string;
   onChangeDate: (date: string) => void;
   reason: string;
   onChangeReason: (reason: string) => void;
   studentTeacherName: string;
   onChangeStudentTeacherName: (name: string) => void;
-  assignments: Record<number, string>;
-  onChangeAssignment: (periodIndex: number, value: string) => void;
+  assignments: Record<string, string>;
+  onChangeAssignment: (slotKey: string, periodIndex: number, value: string) => void;
   onResetAutoAssign: () => void;
   includeSupervision: boolean;
   onChangeIncludeSupervision: (inc: boolean) => void;
@@ -48,14 +58,17 @@ interface SubstitutePlannerProps {
   onLoadSavedRecord: (record: SavedSubstituteRecord) => void;
   onDeleteSavedRecord: (recordId: string) => Promise<void>;
   onOpenDatabaseTab: () => void;
+  autoSaveState?: "idle" | "saving" | "saved";
 }
 
 const REASON_PRESETS = ["ไปราชการ", "อบรม/สัมมนา", "ลากิจ", "ลาป่วย", "คุมสอบ/นำนักเรียนแข่งขัน"];
 
 export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
   teachers,
-  selectedTeacherId,
-  onChangeTeacherId,
+  absentTeacherIds,
+  onChangePrimaryTeacherId,
+  onAddAbsentTeacher,
+  onRemoveAbsentTeacher,
   selectedDate,
   onChangeDate,
   reason,
@@ -73,6 +86,7 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
   onLoadSavedRecord,
   onDeleteSavedRecord,
   onOpenDatabaseTab,
+  autoSaveState = "saved",
 }) => {
   const paperRef = useRef<HTMLDivElement | null>(null);
   const [statusMsg, setStatusMsg] = useState<{ text: string; type: "ok" | "err" | "info" | "" }>({
@@ -84,15 +98,32 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
   const [previewDataUrl, setPreviewDataUrl] = useState<string>("");
   const [fontReadyTick, setFontReadyTick] = useState<number>(0);
   const [fullscreenImageOpen, setFullscreenImageOpen] = useState<boolean>(false);
+  const [addingTeacherPickerOpen, setAddingTeacherPickerOpen] = useState<boolean>(false);
 
   const regularTeachers = teachers.filter((t) => !t.isStudentTeacher);
   const studentTeachers = teachers.filter((t) => Boolean(t.isStudentTeacher));
 
-  const absentTeacher = getTeacherById(selectedTeacherId);
+  const primaryTeacherId = absentTeacherIds[0] || "";
+  const primaryTeacher = getTeacherById(primaryTeacherId);
+
+  // รายชื่อครูที่ลาทุกคนที่เลือกไว้ในตารางเดียวกัน
+  const selectedAbsentTeachers: TeacherRecord[] = absentTeacherIds
+    .map((id) => getTeacherById(id))
+    .filter((t): t is TeacherRecord => Boolean(t));
+
+  const allAbsentNumericIds = selectedAbsentTeachers.map((t) => t.id);
+
+  // หัวกระดาษรวมรายชื่อครูที่ลาทุกคนในตารางเดียวกัน
+  const combinedHeaderTeacher = buildCombinedTeacherHeader(absentTeacherIds);
+
   const dayIdx = getDayIndex(selectedDate);
-  const classes = getTeacherClasses(selectedTeacherId, selectedDate, includeSupervision);
-  const docRows = buildDocumentRows(
-    selectedTeacherId,
+  const combinedClasses = getCombinedTeacherClasses(
+    absentTeacherIds,
+    selectedDate,
+    includeSupervision
+  );
+  const docRows = buildCombinedDocumentRows(
+    absentTeacherIds,
     selectedDate,
     assignments,
     studentTeacherName,
@@ -100,7 +131,10 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
   );
 
   const canExport = Boolean(
-    absentTeacher && dayIdx >= 0 && docRows.length > 0 && docRows.every((r) => r.n !== "-")
+    combinedHeaderTeacher &&
+      dayIdx >= 0 &&
+      docRows.length > 0 &&
+      docRows.every((r) => r.n !== "-")
   );
 
   // เมื่อฟอนต์ภาษาไทยโหลดเสร็จบน iOS Safari / Messenger WebView ให้สั่งวาด Canvas ใหม่อีกครั้งเพื่อให้ฟอนต์คมชัด 100%
@@ -116,14 +150,14 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
     };
   }, []);
 
-  // วาดภาพตัวอย่าง A4 ความละเอียดสูงจาก Canvas 2D โดยตรง เพื่อให้แสดงผลเหมือนกัน 100% บนทุกอุปกรณ์และทุกขนาดหน้าจอ
+  // วาดภาพตัวอย่าง A4 ความละเอียดสูงจาก Canvas 2D โดยตรง (ตารางเดียวรวมทุกคนที่ลา)
   useEffect(() => {
     let cancelled = false;
-    if (!absentTeacher || dayIdx < 0 || docRows.length === 0) {
+    if (!combinedHeaderTeacher || dayIdx < 0 || docRows.length === 0) {
       setPreviewDataUrl("");
       return;
     }
-    renderPaperToCanvas(absentTeacher, selectedDate, reason, docRows)
+    renderPaperToCanvas(combinedHeaderTeacher, selectedDate, reason, docRows)
       .then((canvas) => {
         if (!cancelled) {
           setPreviewDataUrl(canvas.toDataURL("image/png"));
@@ -138,7 +172,7 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
       cancelled = true;
     };
   }, [
-    absentTeacher,
+    combinedHeaderTeacher,
     dayIdx,
     selectedDate,
     reason,
@@ -164,13 +198,13 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
   };
 
   const handleExport = async (format: "word" | "pdf" | "image") => {
-    if (!absentTeacher || !canExport) return;
+    if (!combinedHeaderTeacher || !canExport) return;
     try {
       setIsExporting(true);
       setStatusMsg({ text: "กำลังสร้างไฟล์เอกสาร...", type: "info" });
       await exportSubstituteDocument(
         format,
-        absentTeacher,
+        combinedHeaderTeacher,
         selectedDate,
         reason,
         docRows,
@@ -186,12 +220,18 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
   };
 
   const handleSaveToDatabase = async () => {
-    if (!absentTeacher || !canExport) return;
+    if (!combinedHeaderTeacher || !canExport) return;
     try {
       setIsSavingRecord(true);
       await onSaveCurrentRecord();
+      const label =
+        selectedAbsentTeachers.length > 1
+          ? `รวม ${selectedAbsentTeachers.length} ท่าน (${selectedAbsentTeachers
+              .map((t) => t.n)
+              .join(", ")})`
+          : combinedHeaderTeacher.n;
       setStatusMsg({
-        text: `บันทึกใบสอนแทนของ ${absentTeacher.n} (${formatThaiDate(selectedDate)}) ลงฐานข้อมูลเรียบร้อยแล้ว`,
+        text: `บันทึกใบสอนแทนของ ${label} (${formatThaiDate(selectedDate)}) ลงฐานข้อมูลเรียบร้อยแล้ว`,
         type: "ok",
       });
     } catch (err: unknown) {
@@ -206,11 +246,17 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
     window.print();
   };
 
-  const hasSupervisionSlots =
-    absentTeacher && (absentTeacher.id === 100 || absentTeacher.id === 101);
+  const hasSupervisionSlots = selectedAbsentTeachers.some(
+    (t) => t.id === 100 || t.id === 101
+  );
+
+  // รายชื่อครูที่ยังไม่ได้อยู่ในตารางลาวันนี้
+  const availableTeachersToAdd = teachers.filter(
+    (t) => !allAbsentNumericIds.includes(t.id)
+  );
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-[420px_1fr] gap-4 sm:gap-5 items-start w-full">
+    <div className="grid grid-cols-1 lg:grid-cols-[440px_1fr] gap-4 sm:gap-5 items-start w-full">
       {/* แผงตั้งค่าและจัดคาบสอนแทนด้านซ้าย */}
       <section className="min-w-0 w-full bg-white dark:bg-[#14204a] border border-[#c9d4ec] dark:border-[#2a3a6e] rounded-xl p-4 sm:p-5 shadow-xs print:hidden">
         <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
@@ -218,10 +264,10 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
             จัดครูสอนแทน
           </h2>
           <div className="flex items-center gap-2.5">
-            {absentTeacher && (
+            {primaryTeacher && (
               <button
                 type="button"
-                onClick={() => onViewTeacherTimetable(absentTeacher.id)}
+                onClick={() => onViewTeacherTimetable(primaryTeacher.id)}
                 className="text-xs sm:text-sm font-semibold text-[#1b4fb8] dark:text-[#6c97ff] hover:underline flex items-center gap-1 cursor-pointer whitespace-nowrap"
               >
                 <Table2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
@@ -239,18 +285,17 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
           </div>
         </div>
 
-        {/* เลือกครูที่ลา/ไปราชการ */}
+        {/* เลือกครูหลัก (#ta) */}
         <label
           htmlFor="ta"
-          className="block font-semibold text-[#0f2150] dark:text-[#e9eefc] mt-2 mb-1"
+          className="block font-semibold text-[#0f2150] dark:text-[#e9eefc] mb-1"
         >
-          ครูที่ไม่สามารถสอนได้ (ครูประจำ {regularTeachers.length} ท่าน · นศ.ฝึกสอน{" "}
-          {studentTeachers.length} ท่าน)
+          ครูที่ไม่สามารถสอนได้ (ครูประจำ {regularTeachers.length} ท่าน · นศ.ฝึกสอน {studentTeachers.length} ท่าน)
         </label>
         <select
           id="ta"
-          value={selectedTeacherId}
-          onChange={(e) => onChangeTeacherId(e.target.value)}
+          value={primaryTeacherId}
+          onChange={(e) => onChangePrimaryTeacherId(e.target.value)}
           className="w-full max-w-full px-3 py-2 rounded-lg border border-[#c9d4ec] dark:border-[#2a3a6e] bg-white dark:bg-[#0b1330] text-[#0f2150] dark:text-[#e9eefc] font-medium focus:outline-2 focus:outline-[#f2c230]"
         >
           <option value="">— เลือกครูผู้สอน —</option>
@@ -278,6 +323,113 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
           )}
         </select>
 
+        {/* ส่วนเพิ่มครูที่ลาเพิ่มเติมลงในตารางเดียวกัน (รวมอยู่ในใบเดียวกัน ไม่แยกตาราง) */}
+        <div className="mt-2.5 p-3 rounded-xl bg-[#eaf0fa]/70 dark:bg-[#0b1330]/80 border border-[#c9d4ec] dark:border-[#2a3a6e]">
+          <div className="flex items-center justify-between gap-2 mb-2">
+            <div className="flex items-center gap-1.5 text-xs sm:text-sm font-bold text-[#0f2150] dark:text-[#e9eefc]">
+              <Users className="w-4 h-4 text-[#1b4fb8] dark:text-[#6c97ff] shrink-0" />
+              <span>
+                ครูที่ลาในตารางนี้ ({selectedAbsentTeachers.length} ท่าน)
+              </span>
+            </div>
+            {addingTeacherPickerOpen && (
+              <span className="text-[11px] font-semibold text-[#1b4fb8] dark:text-[#6c97ff]">
+                รวมในตารางเดียวกัน
+              </span>
+            )}
+          </div>
+
+          {/* แสดงรายชื่อครูทุกคนที่รวมอยู่ในตารางใบสอนแทนนี้ */}
+          {selectedAbsentTeachers.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mb-2.5">
+              {selectedAbsentTeachers.map((t) => {
+                const tClasses = getTeacherClasses(
+                  t.id,
+                  selectedDate,
+                  includeSupervision
+                );
+                return (
+                  <div
+                    key={t.id}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white dark:bg-[#14204a] border border-[#c9d4ec] dark:border-[#2a3a6e] text-xs font-semibold text-[#0f2150] dark:text-[#e9eefc]"
+                  >
+                    <span className="text-[#1b4fb8] dark:text-[#6c97ff] font-bold">
+                      {t.id}
+                    </span>
+                    <span>{t.n}</span>
+                    <span className="text-[#51608a] dark:text-[#9fb0dc] font-normal">
+                      ({tClasses.length} คาบ)
+                    </span>
+                    {selectedAbsentTeachers.length > 1 && (
+                      <button
+                        type="button"
+                        title={`นำ ${t.n} ออกจากตาราง`}
+                        onClick={() => onRemoveAbsentTeacher(String(t.id))}
+                        className="ml-0.5 p-0.5 rounded hover:bg-red-100 dark:hover:bg-red-950 text-red-600 dark:text-red-400 cursor-pointer"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* เลือกเพิ่มครูที่ลาคนที่ 2, 3... ลงในตารางเดียวกันได้ทันทีในขั้นตอนเดียว */}
+          <div className="flex items-center gap-1.5">
+            <UserPlus className="w-4 h-4 text-[#1b4fb8] dark:text-[#6c97ff] shrink-0" />
+            <select
+              id="add-teacher-select"
+              aria-label="เลือกครูที่ลาเพิ่มเติมในตารางเดียวกัน"
+              value=""
+              onChange={(e) => {
+                if (e.target.value) {
+                  onAddAbsentTeacher(e.target.value);
+                  setAddingTeacherPickerOpen(true);
+                }
+              }}
+              className="w-full px-2.5 py-1.5 rounded-lg border border-[#1b4fb8]/50 dark:border-[#6c97ff]/50 bg-white dark:bg-[#14204a] text-[#0f2150] dark:text-[#e9eefc] text-xs sm:text-sm font-semibold focus:outline-2 focus:outline-[#f2c230]"
+            >
+              <option value="">
+                + เพิ่มครูที่ลาคนอื่นลงในตารางเดียวกัน (กรณีลาพร้อมกันมากกว่า 1 ท่าน)...
+              </option>
+              {DEPARTMENT_GROUPS.map((group) => {
+                const groupTeachers = availableTeachersToAdd.filter(
+                  (t) => !t.isStudentTeacher && t.g === group
+                );
+                if (groupTeachers.length === 0) return null;
+                return (
+                  <optgroup key={group} label={`กลุ่มสาระ/งาน: ${group}`}>
+                    {groupTeachers.map((t) => (
+                      <option key={t.id} value={String(t.id)}>
+                        {t.id} {t.n} ({t.pdfGroup})
+                      </option>
+                    ))}
+                  </optgroup>
+                );
+              })}
+              {availableTeachersToAdd.some((t) => t.isStudentTeacher) && (
+                <optgroup label="นักศึกษาฝึกสอน">
+                  {availableTeachersToAdd
+                    .filter((t) => t.isStudentTeacher)
+                    .map((t) => (
+                      <option key={t.id} value={String(t.id)}>
+                        {t.id} {t.n} (นศ.ฝึกสอน · {t.pdfGroup})
+                      </option>
+                    ))}
+                </optgroup>
+              )}
+            </select>
+          </div>
+
+          {selectedAbsentTeachers.length > 1 && (
+            <p className="text-[11px] text-[#1b4fb8] dark:text-[#6c97ff] mt-2 mb-0 font-medium">
+              ✓ รวมคาบสอนของครูทั้ง {selectedAbsentTeachers.length} ท่านไว้ในตารางเดียวกันและใบเดียวกัน พร้อมป้องกันคนสอนแทนซ้ำกันในคาบเดียวกันอัตโนมัติ
+            </p>
+          )}
+        </div>
+
         {/* เลือกวันที่ */}
         <label
           htmlFor="dt"
@@ -293,7 +445,7 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
           className="block w-full max-w-full min-w-0 appearance-none px-3 py-2 rounded-lg border border-[#c9d4ec] dark:border-[#2a3a6e] bg-white dark:bg-[#0b1330] text-[#0f2150] dark:text-[#e9eefc] font-medium focus:outline-2 focus:outline-[#f2c230]"
         />
 
-        {/* ปุ่มลัดเลือกวันจันทร์-ศุกร์ (จัดเรียง 5 ช่องเท่ากันในแถวเดียว ไม่ตกบรรทัดบนมือถือ) */}
+        {/* ปุ่มลัดเลือกวันจันทร์-ศุกร์ */}
         <div className="grid grid-cols-5 gap-1.5 mt-2">
           {DAYS.map((dayName, idx) => (
             <button
@@ -385,9 +537,9 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
           </label>
         )}
 
-        {/* รายการคาบสอนที่ต้องจัดคนแทน */}
+        {/* รายการคาบสอนที่ต้องจัดคนแทน (รวมทุกท่านในตารางเดียวกัน) */}
         <div id="plan" className="mt-4 pt-3 border-t border-[#c9d4ec] dark:border-[#2a3a6e]">
-          {!absentTeacher ? (
+          {selectedAbsentTeachers.length === 0 ? (
             <p className="text-[#51608a] dark:text-[#9fb0dc] text-base">
               เลือกครูที่ไม่สามารถสอนได้ ระบบจะค้นหาคาบสอนและจัดครูสอนแทนที่ว่างในกลุ่มสาระเดียวกันให้อัตโนมัติ
             </p>
@@ -401,10 +553,13 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                 วันที่เลือกตรงกับวันเสาร์–อาทิตย์ ไม่มีคาบสอน กรุณาเลือกวันจันทร์–ศุกร์
               </p>
             </div>
-          ) : classes.length === 0 ? (
+          ) : combinedClasses.length === 0 ? (
             <div className="p-3 rounded-lg bg-[#eaf0fa]/60 dark:bg-[#0b1330]/60 border border-[#c9d4ec] dark:border-[#2a3a6e]">
               <p className="text-[#51608a] dark:text-[#9fb0dc] font-medium">
-                <b>{absentTeacher.n}</b> ไม่มีคาบสอนวิชาปกติในวัน{DAYS[dayIdx]}
+                <b>
+                  {selectedAbsentTeachers.map((t) => t.n).join(", ")}
+                </b>{" "}
+                ไม่มีคาบสอนวิชาปกติในวัน{DAYS[dayIdx]}
               </p>
               <p className="text-xs text-[#51608a] dark:text-[#9fb0dc] mt-1">
                 สามารถกดเลือกวันอื่นในสัปดาห์ด้านบนเพื่อดูคาบสอนในวันอื่นได้ทันที
@@ -414,33 +569,86 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
             <div className="space-y-3">
               <div className="flex items-center justify-between">
                 <p className="font-semibold text-[#0f2150] dark:text-[#e9eefc]">
-                  <span>{absentTeacher.n}</span> · มี {classes.length} คาบในวัน{DAYS[dayIdx]}
+                  {selectedAbsentTeachers.length === 1 ? (
+                    <>
+                      <span>{selectedAbsentTeachers[0].n}</span> · มี{" "}
+                      {combinedClasses.length} คาบในวัน{DAYS[dayIdx]}
+                    </>
+                  ) : (
+                    <>
+                      <span>
+                        รวมทั้งหมด {combinedClasses.length} คาบในวัน{DAYS[dayIdx]}
+                      </span>{" "}
+                      <span className="text-xs text-[#1b4fb8] dark:text-[#6c97ff]">
+                        (จากครูที่ลา {selectedAbsentTeachers.length} ท่าน ในตารางเดียวกัน)
+                      </span>
+                    </>
+                  )}
                 </p>
               </div>
 
-              {classes.map((slot) => {
-                const candidates = getCandidateTeachers(absentTeacher.id, selectedDate, slot.p);
-                const sameGroupRegular = candidates.filter(
-                  (c) => !c.isStudentTeacher && c.g === absentTeacher.g
+              {combinedClasses.map((slot) => {
+                // ตรวจสอบว่ามีครูคนไหนถูกเลือกให้สอนแทนคาบอื่นในคาบเรียนเดียวกัน (slot.p) ไปแล้วบ้าง
+                const assignedInOtherSlotsSamePeriod: number[] = [];
+                combinedClasses.forEach((otherSlot) => {
+                  if (otherSlot.slotKey === slot.slotKey) return;
+                  if (otherSlot.p !== slot.p) return;
+                  const val = getSlotAssignment(
+                    assignments,
+                    otherSlot.absentTeacherId,
+                    otherSlot.p
+                  );
+                  if (val && val.startsWith("t")) {
+                    const tid = Number(val.slice(1));
+                    if (Number.isFinite(tid)) {
+                      assignedInOtherSlotsSamePeriod.push(tid);
+                    }
+                  }
+                });
+
+                const excludedIdsForSlot = Array.from(
+                  new Set([
+                    ...allAbsentNumericIds,
+                    ...assignedInOtherSlotsSamePeriod,
+                  ])
                 );
-                const freeStudentTeachers = candidates.filter((c) => c.isStudentTeacher);
+
+                const candidates = getCandidateTeachers(
+                  slot.absentTeacherId,
+                  selectedDate,
+                  slot.p,
+                  excludedIdsForSlot
+                );
+                const sameGroupRegular = candidates.filter(
+                  (c) => !c.isStudentTeacher && c.g === slot.absentTeacherGroup
+                );
+                const freeStudentTeachers = candidates.filter(
+                  (c) => c.isStudentTeacher
+                );
                 const otherGroupRegular = candidates.filter(
-                  (c) => !c.isStudentTeacher && c.g !== absentTeacher.g
+                  (c) => !c.isStudentTeacher && c.g !== slot.absentTeacherGroup
                 );
                 const noSameGroupRegular = sameGroupRegular.length === 0;
+                const currentVal =
+                  getSlotAssignment(assignments, slot.absentTeacherId, slot.p) || "s";
 
                 return (
                   <div
-                    key={slot.p}
+                    key={slot.slotKey}
                     className="border-t border-dashed border-[#c9d4ec] dark:border-[#2a3a6e] pt-2.5 grid gap-1.5"
                   >
-                    <div className="flex items-center justify-between gap-2 text-sm sm:text-base">
+                    <div className="flex items-center justify-between gap-2 text-sm sm:text-base flex-wrap">
                       <span className="min-w-0">
                         <b>คาบที่ {slot.p + 1}</b> ({slot.tm}) ·{" "}
                         <span className="font-semibold text-[#1b4fb8] dark:text-[#6c97ff]">
                           {slot.code}
                         </span>{" "}
                         ชั้น <b>{slot.cls}</b>
+                        {selectedAbsentTeachers.length > 1 && (
+                          <span className="ml-1.5 inline-block px-1.5 py-0.5 rounded bg-[#eaf0fa] dark:bg-[#0b1330] text-xs font-semibold text-[#1b4fb8] dark:text-[#6c97ff]">
+                            วิชาของ {slot.absentTeacherId} {slot.absentTeacherName}
+                          </span>
+                        )}
                       </span>
                       <span className="text-xs text-[#51608a] dark:text-[#9fb0dc] whitespace-nowrap shrink-0">
                         {formatRoomLabel(slot.room)}
@@ -449,13 +657,18 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
 
                     <select
                       data-p={slot.p}
-                      aria-label={`ครูสอนแทนคาบ ${slot.p + 1}`}
-                      value={assignments[slot.p] || "s"}
-                      onChange={(e) => onChangeAssignment(slot.p, e.target.value)}
+                      data-slot={slot.slotKey}
+                      aria-label={`ครูสอนแทนคาบ ${slot.p + 1} (${slot.code})`}
+                      value={currentVal}
+                      onChange={(e) =>
+                        onChangeAssignment(slot.slotKey, slot.p, e.target.value)
+                      }
                       className="w-full max-w-full px-2.5 py-1.5 rounded-md border border-[#c9d4ec] dark:border-[#2a3a6e] bg-white dark:bg-[#0b1330] text-[#0f2150] dark:text-[#e9eefc] text-sm sm:text-base focus:outline-2 focus:outline-[#f2c230]"
                     >
                       {sameGroupRegular.length > 0 && (
-                        <optgroup label={`★ ครูกลุ่มสาระเดียวกันที่ว่าง (${sameGroupRegular.length} ท่าน)`}>
+                        <optgroup
+                          label={`★ ครูกลุ่มสาระเดียวกันที่ว่าง (${sameGroupRegular.length} ท่าน)`}
+                        >
                           {sameGroupRegular.map((t) => (
                             <option key={t.id} value={`t${t.id}`}>
                               ★ {t.id} {t.n} (กลุ่มสาระเดียวกัน · {t.pdfGroup})
@@ -464,17 +677,22 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                         </optgroup>
                       )}
                       {freeStudentTeachers.length > 0 && (
-                        <optgroup label={`นักศึกษาฝึกสอนที่ว่างในคาบนี้ (${freeStudentTeachers.length} ท่าน)`}>
+                        <optgroup
+                          label={`นักศึกษาฝึกสอนที่ว่างในคาบนี้ (${freeStudentTeachers.length} ท่าน)`}
+                        >
                           {freeStudentTeachers.map((t) => (
                             <option key={t.id} value={`t${t.id}`}>
-                              {t.g === absentTeacher.g ? "★ " : ""}
-                              {t.id} {t.n} (นศ.ฝึกสอน · {t.pdfGroup} - {formatRoomLabel(t.r)})
+                              {t.g === slot.absentTeacherGroup ? "★ " : ""}
+                              {t.id} {t.n} (นศ.ฝึกสอน · {t.pdfGroup} -{" "}
+                              {formatRoomLabel(t.r)})
                             </option>
                           ))}
                         </optgroup>
                       )}
                       {otherGroupRegular.length > 0 && (
-                        <optgroup label={`ครูต่างกลุ่มสาระที่ว่าง (${otherGroupRegular.length} ท่าน)`}>
+                        <optgroup
+                          label={`ครูต่างกลุ่มสาระที่ว่าง (${otherGroupRegular.length} ท่าน)`}
+                        >
                           {otherGroupRegular.map((t) => (
                             <option key={t.id} value={`t${t.id}`}>
                               {t.id} {t.n} ({t.pdfGroup})
@@ -494,7 +712,7 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
 
                     {noSameGroupRegular && (
                       <small className="text-xs text-amber-700 dark:text-amber-300">
-                        ไม่มีครูประจำกลุ่มสาระ{absentTeacher.g}ว่างในคาบนี้{" "}
+                        ไม่มีครูประจำกลุ่มสาระ{slot.absentTeacherGroup}ว่างในคาบนี้{" "}
                         {freeStudentTeachers.length > 0
                           ? `(ระบบเลือกนักศึกษาฝึกสอนที่ว่างให้อัตโนมัติ หรือเลือกครูต่างกลุ่มสาระได้)`
                           : `(สามารถเลือกครูต่างกลุ่มสาระหรือระบุชื่อนักศึกษาฝึกสอนได้)`}
@@ -507,8 +725,8 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
           )}
         </div>
 
-        {/* ปุ่มจัดอัตโนมัติใหม่ & บันทึกใบสอนแทนลงฐานข้อมูล */}
-        <div className="flex flex-wrap gap-2 mt-4">
+        {/* ปุ่มจัดอัตโนมัติใหม่ & สถานะบันทึกอัตโนมัติลงฐานข้อมูลกลาง */}
+        <div className="flex flex-wrap items-center gap-2 mt-4">
           <button
             type="button"
             id="au"
@@ -526,8 +744,17 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
             className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[#0b7a4b] hover:bg-[#085c38] disabled:opacity-40 text-white font-semibold text-sm sm:text-base transition-colors cursor-pointer"
           >
             <Save className="w-4 h-4 shrink-0" />
-            <span>{isSavingRecord ? "กำลังบันทึก..." : "บันทึกใบสอนแทน"}</span>
+            <span>{isSavingRecord ? "กำลังบันทึก..." : "บันทึกเก็บในประวัติ"}</span>
           </button>
+
+          <span
+            id="autosave-badge"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 text-xs font-bold text-[#0b7a4b] dark:text-[#4fd39a]"
+          >
+            {autoSaveState === "saving"
+              ? "กำลังบันทึกอัตโนมัติ..."
+              : "✓ บันทึกอัตโนมัติแล้ว (เห็นตรงกันทุกคน)"}
+          </span>
         </div>
 
         {/* รายการใบสอนแทนที่บันทึกไว้ล่าสุด */}
@@ -553,7 +780,9 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                 >
                   <div className="min-w-0 truncate">
                     <span className="font-bold text-[#0f2150] dark:text-[#e9eefc]">
-                      {rec.absentTeacherId} {rec.absentTeacherName}
+                      {/^\d{3}\s/.test(rec.absentTeacherName)
+                        ? rec.absentTeacherName
+                        : `${rec.absentTeacherId} ${rec.absentTeacherName}`}
                     </span>{" "}
                     <span className="text-[#51608a] dark:text-[#9fb0dc]">
                       · {formatThaiDate(rec.selectedDate)}
@@ -585,16 +814,23 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
         )}
 
         <p className="text-sm text-[#51608a] dark:text-[#9fb0dc] mt-3 mb-0 leading-relaxed">
-          หลักการ: จัดครูประจำกลุ่มสาระเดียวกันที่ว่างก่อน (★) โดยเกลี่ยคาบให้สมดุล หากไม่มีครูในกลุ่มสาระว่าง ระบบจะจัดนักศึกษาฝึกสอนที่ว่างในคาบนั้นให้อัตโนมัติ
+          หลักการ: จัดครูประจำกลุ่มสาระเดียวกันที่ว่างก่อน (★) โดยเกลี่ยคาบให้สมดุลและไม่ซ้ำคนในคาบเดียวกันเมื่อมีครูลาหลายท่านในตารางเดียวกัน หากไม่มีครูในกลุ่มสาระว่าง ระบบจะจัดนักศึกษาฝึกสอนที่ว่างในคาบนั้นให้อัตโนมัติ
         </p>
       </section>
 
       {/* แผงแสดงตัวอย่างเอกสารใบสอนแทน (A4) ด้านขวา */}
       <section className="min-w-0 w-full bg-white dark:bg-[#14204a] border border-[#c9d4ec] dark:border-[#2a3a6e] rounded-xl p-4 sm:p-5 shadow-xs">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3 print:hidden">
-          <h2 className="text-xl font-bold text-[#0f2150] dark:text-[#e9eefc]">
-            ตัวอย่างเอกสารใบสอนแทน
-          </h2>
+          <div>
+            <h2 className="text-xl font-bold text-[#0f2150] dark:text-[#e9eefc]">
+              ตัวอย่างเอกสารใบสอนแทน
+            </h2>
+            {selectedAbsentTeachers.length > 1 && (
+              <p className="text-xs font-semibold text-[#1b4fb8] dark:text-[#6c97ff] mt-0.5">
+                ตารางรวมครูที่ลา {selectedAbsentTeachers.length} ท่าน ({docRows.length} คาบเรียน) ในใบเดียวกัน
+              </p>
+            )}
+          </div>
           <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2">
             <button
               type="button"
@@ -679,7 +915,7 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
             ref={paperRef}
             className="paper-sheet w-full max-w-[794px] bg-white text-black mx-auto shadow-md print:shadow-none relative overflow-hidden"
           >
-            {!absentTeacher || dayIdx < 0 || docRows.length === 0 ? (
+            {!combinedHeaderTeacher || dayIdx < 0 || docRows.length === 0 ? (
               <div className="text-center py-36 px-6 text-neutral-500 min-h-[640px] flex flex-col items-center justify-center">
                 <img
                   src={SCHOOL_LOGO}
@@ -715,12 +951,15 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                     <h3>โรงเรียนวรคุณอุปถัมภ์</h3>
                     <h4>
                       ตารางสอนแทน ภาคเรียนที่ 2 ปีการศึกษา 2569 กลุ่ม/ฝ่าย/งาน{" "}
-                      {absentTeacher.pdfGroup}
+                      {combinedHeaderTeacher.pdfGroup}
                     </h4>
                   </div>
                   <p>
-                    ครูผู้สอน {absentTeacher.id} {absentTeacher.n} วัน{DAYS[dayIdx]}ที่{" "}
-                    {formatThaiDate(selectedDate)}
+                    ครูผู้สอน{" "}
+                    {/^\d{3}\s/.test(combinedHeaderTeacher.n)
+                      ? combinedHeaderTeacher.n
+                      : `${combinedHeaderTeacher.id} ${combinedHeaderTeacher.n}`}{" "}
+                    วัน{DAYS[dayIdx]}ที่ {formatThaiDate(selectedDate)}
                   </p>
                   <p>
                     ไม่สามารถปฏิบัติการสอนได้เนื่องจาก {reason || "-"} จึงมอบหมายให้สอนแทนดังนี้
@@ -739,8 +978,8 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                       </tr>
                     </thead>
                     <tbody>
-                      {docRows.map((row) => (
-                        <tr key={row.p}>
+                      {docRows.map((row, idx) => (
+                        <tr key={row.slotKey || `${row.p}-${idx}`}>
                           <td>{row.p}</td>
                           <td>{row.tm}</td>
                           <td>{row.code}</td>

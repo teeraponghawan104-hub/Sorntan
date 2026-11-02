@@ -2,7 +2,7 @@
   "entities": {
     "Teacher": {
       "title": "Teacher",
-      "description": "Teacher or student teacher record with master timetable schedule for Worakhun Uppatham School",
+      "description": "Teacher or student teacher record with master timetable schedule for Worakhun Uppatham School (shared across all school devices)",
       "type": "object",
       "properties": {
         "id": {
@@ -58,7 +58,7 @@
         },
         "ownerId": {
           "type": "string",
-          "description": "UID of the user who owns/manages this teacher record",
+          "description": "Shared school scope identifier ('worakhun_shared')",
           "minLength": 1,
           "maxLength": 128,
           "pattern": "^[a-zA-Z0-9_\\-]+$"
@@ -92,31 +92,31 @@
     },
     "SubstituteRecord": {
       "title": "SubstituteRecord",
-      "description": "Saved substitute teaching assignment sheet for a specific teacher and date",
+      "description": "Saved substitute teaching assignment sheet or live shared planner workspace for Worakhun Uppatham School",
       "type": "object",
       "properties": {
         "recordId": {
           "type": "string",
-          "description": "Unique document ID",
+          "description": "Unique document ID (e.g., live_workspace or rec_102_20261102)",
           "minLength": 1,
           "maxLength": 128,
           "pattern": "^[a-zA-Z0-9_\\-]+$"
         },
         "absentTeacherId": {
           "type": "number",
-          "description": "Numeric ID of the absent teacher"
+          "description": "Numeric ID of the primary absent teacher"
         },
         "absentTeacherName": {
           "type": "string",
-          "description": "Name of the absent teacher",
+          "description": "Name(s) of the absent teacher(s) in the single table",
           "minLength": 1,
-          "maxLength": 120
+          "maxLength": 300
         },
         "absentTeacherGroup": {
           "type": "string",
-          "description": "Department group of the absent teacher",
+          "description": "Department group(s) of the absent teacher(s)",
           "minLength": 1,
-          "maxLength": 60
+          "maxLength": 150
         },
         "selectedDate": {
           "type": "string",
@@ -141,12 +141,12 @@
         },
         "assignmentsJson": {
           "type": "string",
-          "description": "Compact period-to-substitute assignment mapping string (e.g. 0:t103,1:t308)",
-          "maxLength": 400
+          "description": "Compact period-to-substitute assignment mapping string including multi-teacher list",
+          "maxLength": 2000
         },
         "ownerId": {
           "type": "string",
-          "description": "UID of the creator",
+          "description": "Shared school scope identifier ('worakhun_shared')",
           "minLength": 1,
           "maxLength": 128,
           "pattern": "^[a-zA-Z0-9_\\-]+$"
@@ -176,38 +176,16 @@
         "createdAt",
         "updatedAt"
       ]
-    },
-    "Admin": {
-      "title": "Admin",
-      "description": "Administrator user record",
-      "type": "object",
-      "properties": {
-        "uid": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 128,
-          "pattern": "^[a-zA-Z0-9_\\-]+$"
-        },
-        "createdAt": {
-          "type": "string",
-          "format": "date-time"
-        }
-      },
-      "required": ["uid", "createdAt"]
     }
   },
   "firestore": {
     "/teachers/{teacherId}": {
       "schema": { "$ref": "#/entities/Teacher" },
-      "description": "Stores teacher and student teacher profiles and 5x7 timetables"
+      "description": "Stores shared teacher and student teacher profiles and 5x7 timetables for all users"
     },
     "/substitute_records/{recordId}": {
       "schema": { "$ref": "#/entities/SubstituteRecord" },
-      "description": "Stores saved substitute teaching assignment forms"
-    },
-    "/admins/{adminId}": {
-      "schema": { "$ref": "#/entities/Admin" },
-      "description": "Stores administrator UIDs for role-based access"
+      "description": "Stores shared saved substitute teaching assignment forms and live auto-saved planner state"
     }
   }
 }

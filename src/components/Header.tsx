@@ -37,7 +37,7 @@ export const Header: React.FC<HeaderProps> = ({
                 ระบบจัดสอนแทน โรงเรียนวรคุณอุปถัมภ์
               </h1>
               <p className="text-[11.5px] sm:text-sm text-blue-100/90 leading-snug mt-0.5">
-                ภาคเรียนที่ 2 ปีการศึกษา 2569 · ข้อมูลในระบบ {teacherCount} ท่าน
+                ภาคเรียนที่ 2 ปีการศึกษา 2569 · ข้อมูลในระบบ {teacherCount} ท่าน · ซิงก์อัตโนมัติทุกคน
               </p>
             </div>
           </div>

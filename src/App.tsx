@@ -1,5 +1,4 @@
-import React, { useEffect, useState } from "react";
-import { User, onAuthStateChanged } from "firebase/auth";
+import React, { useEffect, useRef, useState } from "react";
 import { collection, onSnapshot, query, where } from "firebase/firestore";
 import { ActiveTab, Header } from "./components/Header";
 import { SubstitutePlanner } from "./components/SubstitutePlanner";
@@ -9,25 +8,25 @@ import { DatabaseManagerView } from "./components/DatabaseManagerView";
 import { TeacherEditorModal } from "./components/TeacherEditorModal";
 import { INITIAL_TEACHERS, TeacherRecord } from "./data/teachers";
 import {
-  autoAssignSubstitutes,
+  autoAssignCombinedSubstitutes,
+  buildCombinedTeacherHeader,
+  getCombinedTeacherClasses,
   getInitialWeekdayDate,
-  getTeacherById,
 } from "./utils/scheduler";
+import { OperationType, db, handleFirestoreError } from "./firebase";
 import {
-  OperationType,
-  auth,
-  db,
-  handleFirestoreError,
-  signInWithGoogle,
-  signOutUser,
-} from "./firebase";
-import {
+  LIVE_WORKSPACE_DOC_ID,
+  LivePlannerWorkspaceState,
+  SHARED_OWNER_ID,
   SavedSubstituteRecord,
   decodeAssignments,
+  loadLocalPlannerState,
   loadLocalSubstituteRecords,
   loadLocalTeachers,
   removeSubstituteRecordFromDatabase,
   removeTeacherFromDatabase,
+  saveLiveWorkspaceToCloud,
+  saveLocalPlannerState,
   saveLocalSubstituteRecords,
   saveLocalTeachers,
   syncAllTeachersToCloud,
@@ -35,34 +34,70 @@ import {
   upsertTeacherInDatabase,
 } from "./utils/databaseStore";
 
+const CLIENT_SESSION_ID = Math.random().toString(36).slice(2, 10);
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>("planner");
   const [darkMode, setDarkMode] = useState<boolean>(false);
 
-  // รายชื่อครูทั้งหมดและประวัติใบสอนแทนจากฐานข้อมูล
+  // รายชื่อครูทั้งหมดและประวัติใบสอนแทนจากฐานข้อมูลกลาง
   const [teachers, setTeachers] = useState<TeacherRecord[]>(() => loadLocalTeachers());
   const [savedRecords, setSavedRecords] = useState<SavedSubstituteRecord[]>(() =>
     loadLocalSubstituteRecords()
   );
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [autoSaveState, setAutoSaveState] = useState<"idle" | "saving" | "saved">("saved");
 
   // สถานะ Modal แก้ไข/เพิ่มครู
   const [editorModalOpen, setEditorModalOpen] = useState<boolean>(false);
   const [editingTeacher, setEditingTeacher] = useState<TeacherRecord | null>(null);
 
-  // ค่าเริ่มต้นของหน้าจัดครูสอนแทน
+  // โหลดค่าเริ่มต้นของหน้าจัดครูสอนแทนจากที่บันทึกไว้ล่าสุด (หรือค่าเริ่มต้นครู 102)
   const initialDate = getInitialWeekdayDate();
-  const [selectedTeacherId, setSelectedTeacherId] = useState<string>("102");
-  const [selectedDate, setSelectedDate] = useState<string>(initialDate);
-  const [reason, setReason] = useState<string>("ไปราชการ");
-  const [studentTeacherName, setStudentTeacherName] = useState<string>("");
-  const [includeSupervision, setIncludeSupervision] = useState<boolean>(false);
-  const [assignments, setAssignments] = useState<Record<number, string>>(() =>
-    autoAssignSubstitutes("102", initialDate, false)
+  const initialSavedPlanner = loadLocalPlannerState();
+  const initialTeacherIds =
+    initialSavedPlanner && initialSavedPlanner.absentTeacherIds.length > 0
+      ? initialSavedPlanner.absentTeacherIds
+      : ["102"];
+  const initialSelectedDate = initialSavedPlanner?.selectedDate || initialDate;
+  const initialReason = initialSavedPlanner?.reason || "ไปราชการ";
+  const initialStudentTeacherName = initialSavedPlanner?.studentTeacherName || "";
+  const initialIncludeSupervision = Boolean(initialSavedPlanner?.includeSupervision);
+
+  const [absentTeacherIds, setAbsentTeacherIds] = useState<string[]>(initialTeacherIds);
+  const [selectedDate, setSelectedDate] = useState<string>(initialSelectedDate);
+  const [reason, setReason] = useState<string>(initialReason);
+  const [studentTeacherName, setStudentTeacherName] = useState<string>(
+    initialStudentTeacherName
   );
+  const [includeSupervision, setIncludeSupervision] = useState<boolean>(
+    initialIncludeSupervision
+  );
+  const [assignments, setAssignments] = useState<Record<string, string>>(() => {
+    if (
+      initialSavedPlanner &&
+      initialSavedPlanner.assignments &&
+      Object.keys(initialSavedPlanner.assignments).length > 0
+    ) {
+      return initialSavedPlanner.assignments;
+    }
+    return autoAssignCombinedSubstitutes(
+      initialTeacherIds,
+      initialSelectedDate,
+      initialIncludeSupervision
+    );
+  });
+
   const [focusTimetableTeacherId, setFocusTimetableTeacherId] = useState<number | null>(
     null
   );
+
+  // ติดตามการแก้ไขในเครื่องนี้เพื่อป้องกัน Snapshot สะท้อนกลับทับระหว่างพิมพ์
+  const lastLocalWriteIdRef = useRef<string>("");
+  const lastLocalEditTimeRef = useRef<number>(0);
+  const savedRecordsRef = useRef<SavedSubstituteRecord[]>(savedRecords);
+  useEffect(() => {
+    savedRecordsRef.current = savedRecords;
+  }, [savedRecords]);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -73,20 +108,11 @@ export default function App() {
     }
   }, [darkMode]);
 
-  // ตรวจสอบสถานะการเข้าสู่ระบบและซิงก์ข้อมูลกับ Cloud Firestore แบบเรียลไทม์
+  // ซิงก์ข้อมูลกับ Cloud Firestore ฐานข้อมูลกลางแบบเรียลไทม์ทันทีโดยไม่ต้องล็อกอิน
   useEffect(() => {
-    const unsubAuth = onAuthStateChanged(auth, (user) => {
-      setCurrentUser(user);
-    });
-    return () => unsubAuth();
-  }, []);
-
-  useEffect(() => {
-    if (!currentUser || !currentUser.emailVerified) return;
-
     const teachersQuery = query(
       collection(db, "teachers"),
-      where("ownerId", "==", currentUser.uid)
+      where("ownerId", "==", SHARED_OWNER_ID)
     );
 
     let seededOnce = false;
@@ -130,32 +156,81 @@ export default function App() {
 
     const recordsQuery = query(
       collection(db, "substitute_records"),
-      where("ownerId", "==", currentUser.uid)
+      where("ownerId", "==", SHARED_OWNER_ID)
     );
 
     const unsubRecords = onSnapshot(
       recordsQuery,
       (snapshot) => {
-        if (!snapshot.empty) {
-          const cloudRecords: SavedSubstituteRecord[] = [];
-          snapshot.forEach((docSnap) => {
-            const d = docSnap.data();
-            cloudRecords.push({
-              recordId: String(d.recordId || docSnap.id),
-              absentTeacherId: Number(d.absentTeacherId),
-              absentTeacherName: String(d.absentTeacherName || ""),
-              absentTeacherGroup: String(d.absentTeacherGroup || ""),
-              selectedDate: String(d.selectedDate || ""),
-              reason: String(d.reason || "ไปราชการ"),
-              studentTeacherName: String(d.studentTeacherName || ""),
-              includeSupervision: Boolean(d.includeSupervision),
-              assignments: decodeAssignments(String(d.assignmentsJson || "")),
-              updatedAtIso: new Date().toISOString(),
+        const cloudRecords: SavedSubstituteRecord[] = [];
+        snapshot.forEach((docSnap) => {
+          const d = docSnap.data();
+          const decoded = decodeAssignments(String(d.assignmentsJson || ""));
+
+          if (docSnap.id === LIVE_WORKSPACE_DOC_ID) {
+            if (docSnap.metadata.hasPendingWrites) return;
+            if (
+              decoded.clientWriteId &&
+              decoded.clientWriteId === lastLocalWriteIdRef.current
+            ) {
+              return;
+            }
+            if (Date.now() - lastLocalEditTimeRef.current < 1500) {
+              return;
+            }
+
+            const remoteIds =
+              decoded.absentTeacherIds && decoded.absentTeacherIds.length > 0
+                ? decoded.absentTeacherIds
+                : [String(d.absentTeacherId || 102)];
+            const remoteDate = String(d.selectedDate || initialDate);
+            const remoteReason = String(d.reason || "ไปราชการ");
+            const remoteStudentName = String(d.studentTeacherName || "");
+            const remoteSupervision = Boolean(d.includeSupervision);
+            const remoteAssignments =
+              Object.keys(decoded.assignments).length > 0
+                ? decoded.assignments
+                : autoAssignCombinedSubstitutes(
+                    remoteIds,
+                    remoteDate,
+                    remoteSupervision
+                  );
+
+            setAbsentTeacherIds(remoteIds);
+            setSelectedDate(remoteDate);
+            setReason(remoteReason);
+            setStudentTeacherName(remoteStudentName);
+            setIncludeSupervision(remoteSupervision);
+            setAssignments(remoteAssignments);
+            saveLocalPlannerState({
+              absentTeacherIds: remoteIds,
+              selectedDate: remoteDate,
+              reason: remoteReason,
+              studentTeacherName: remoteStudentName,
+              includeSupervision: remoteSupervision,
+              assignments: remoteAssignments,
+              clientWriteId: decoded.clientWriteId,
             });
+            return;
+          }
+
+          cloudRecords.push({
+            recordId: String(d.recordId || docSnap.id),
+            absentTeacherId: Number(d.absentTeacherId),
+            absentTeacherIds: decoded.absentTeacherIds,
+            absentTeacherName: String(d.absentTeacherName || ""),
+            absentTeacherGroup: String(d.absentTeacherGroup || ""),
+            selectedDate: String(d.selectedDate || ""),
+            reason: String(d.reason || "ไปราชการ"),
+            studentTeacherName: String(d.studentTeacherName || ""),
+            includeSupervision: Boolean(d.includeSupervision),
+            assignments: decoded.assignments,
+            updatedAtIso: new Date().toISOString(),
           });
-          saveLocalSubstituteRecords(cloudRecords);
-          setSavedRecords(cloudRecords);
-        }
+        });
+
+        saveLocalSubstituteRecords(cloudRecords);
+        setSavedRecords(cloudRecords);
       },
       (error) => {
         handleFirestoreError(error, OperationType.LIST, "substitute_records");
@@ -166,36 +241,244 @@ export default function App() {
       unsubTeachers();
       unsubRecords();
     };
-  }, [currentUser]);
+  }, []);
 
-  const handleTeacherChange = (newId: string) => {
-    setSelectedTeacherId(newId);
-    setAssignments(autoAssignSubstitutes(newId, selectedDate, includeSupervision));
+  // ฟังก์ชันบันทึกการเปลี่ยนแปลงของหน้าจัดสอนแทนอัตโนมัติ (ทั้งในเครื่องและ Cloud Firestore กลาง)
+  const triggerPlannerAutoSave = (nextState: LivePlannerWorkspaceState) => {
+    const writeId = `${CLIENT_SESSION_ID}_${Date.now()}`;
+    lastLocalWriteIdRef.current = writeId;
+    lastLocalEditTimeRef.current = Date.now();
+
+    const stateWithId: LivePlannerWorkspaceState = {
+      ...nextState,
+      clientWriteId: writeId,
+    };
+    saveLocalPlannerState(stateWithId);
+    setAutoSaveState("saving");
+
+    const combinedHeader = buildCombinedTeacherHeader(nextState.absentTeacherIds);
+    const activeClasses = getCombinedTeacherClasses(
+      nextState.absentTeacherIds,
+      nextState.selectedDate,
+      nextState.includeSupervision
+    );
+
+    const savePromises: Promise<unknown>[] = [
+      saveLiveWorkspaceToCloud(stateWithId, combinedHeader),
+    ];
+
+    if (combinedHeader && activeClasses.length > 0) {
+      const idsPart = nextState.absentTeacherIds.join("-");
+      const recordId = `rec_${idsPart}_${nextState.selectedDate.replace(/[^0-9]/g, "")}`;
+      savePromises.push(
+        upsertSubstituteRecordInDatabase(
+          {
+            recordId,
+            absentTeacherId: combinedHeader.id,
+            absentTeacherIds: [...nextState.absentTeacherIds],
+            absentTeacherName: combinedHeader.n,
+            absentTeacherGroup: combinedHeader.pdfGroup,
+            selectedDate: nextState.selectedDate,
+            reason: nextState.reason,
+            studentTeacherName: nextState.studentTeacherName,
+            includeSupervision: nextState.includeSupervision,
+            assignments: nextState.assignments,
+          },
+          savedRecordsRef.current
+        ).then((updatedRecords) => {
+          setSavedRecords(updatedRecords);
+        })
+      );
+    }
+
+    Promise.all(savePromises)
+      .then(() => {
+        setAutoSaveState("saved");
+      })
+      .catch(() => {
+        setAutoSaveState("saved");
+      });
   };
 
+  // เปลี่ยนครูหลักจาก #ta
+  const handlePrimaryTeacherChange = (newId: string) => {
+    if (!newId) {
+      setAbsentTeacherIds([]);
+      setAssignments({});
+      return;
+    }
+    const rest = absentTeacherIds.slice(1).filter((id) => id !== newId);
+    const nextIds = [newId, ...rest];
+    const nextAssignments = autoAssignCombinedSubstitutes(
+      nextIds,
+      selectedDate,
+      includeSupervision
+    );
+    setAbsentTeacherIds(nextIds);
+    setAssignments(nextAssignments);
+    triggerPlannerAutoSave({
+      absentTeacherIds: nextIds,
+      selectedDate,
+      reason,
+      studentTeacherName,
+      includeSupervision,
+      assignments: nextAssignments,
+    });
+  };
+
+  // เพิ่มครูที่ลาเพิ่มเติมลงในตารางเดียวกัน
+  const handleAddAbsentTeacher = (preferredTeacherId?: string) => {
+    const usedIds = new Set(absentTeacherIds);
+    let targetId = preferredTeacherId || "";
+    if (!targetId || usedIds.has(targetId)) {
+      const nextAvailable = teachers.find((t) => !usedIds.has(String(t.id)));
+      targetId = nextAvailable ? String(nextAvailable.id) : "";
+    }
+    if (!targetId) return;
+
+    const nextIds = [...absentTeacherIds, targetId];
+    const nextAssignments = autoAssignCombinedSubstitutes(
+      nextIds,
+      selectedDate,
+      includeSupervision
+    );
+    setAbsentTeacherIds(nextIds);
+    setAssignments(nextAssignments);
+    triggerPlannerAutoSave({
+      absentTeacherIds: nextIds,
+      selectedDate,
+      reason,
+      studentTeacherName,
+      includeSupervision,
+      assignments: nextAssignments,
+    });
+  };
+
+  // ลบครูออกจากตารางเดียวกัน
+  const handleRemoveAbsentTeacher = (teacherIdToRemove: string) => {
+    if (absentTeacherIds.length <= 1) return;
+    const nextIds = absentTeacherIds.filter((id) => id !== teacherIdToRemove);
+    const nextAssignments = autoAssignCombinedSubstitutes(
+      nextIds,
+      selectedDate,
+      includeSupervision
+    );
+    setAbsentTeacherIds(nextIds);
+    setAssignments(nextAssignments);
+    triggerPlannerAutoSave({
+      absentTeacherIds: nextIds,
+      selectedDate,
+      reason,
+      studentTeacherName,
+      includeSupervision,
+      assignments: nextAssignments,
+    });
+  };
+
+  // เปลี่ยนวันที่สอนแทน
   const handleDateChange = (newDate: string) => {
+    const nextAssignments = autoAssignCombinedSubstitutes(
+      absentTeacherIds,
+      newDate,
+      includeSupervision
+    );
     setSelectedDate(newDate);
-    setAssignments(
-      autoAssignSubstitutes(selectedTeacherId, newDate, includeSupervision)
-    );
+    setAssignments(nextAssignments);
+    triggerPlannerAutoSave({
+      absentTeacherIds,
+      selectedDate: newDate,
+      reason,
+      studentTeacherName,
+      includeSupervision,
+      assignments: nextAssignments,
+    });
   };
 
+  // เปลี่ยนเหตุผล / ภารกิจ
+  const handleReasonChange = (newReason: string) => {
+    setReason(newReason);
+    triggerPlannerAutoSave({
+      absentTeacherIds,
+      selectedDate,
+      reason: newReason,
+      studentTeacherName,
+      includeSupervision,
+      assignments,
+    });
+  };
+
+  // เปลี่ยนชื่อนักศึกษาฝึกสอนเพิ่มเติม
+  const handleStudentTeacherNameChange = (newName: string) => {
+    setStudentTeacherName(newName);
+    triggerPlannerAutoSave({
+      absentTeacherIds,
+      selectedDate,
+      reason,
+      studentTeacherName: newName,
+      includeSupervision,
+      assignments,
+    });
+  };
+
+  // เปลี่ยนตัวเลือกรวมคาบนิเทศสอน
   const handleIncludeSupervisionChange = (inc: boolean) => {
-    setIncludeSupervision(inc);
-    setAssignments(autoAssignSubstitutes(selectedTeacherId, selectedDate, inc));
-  };
-
-  const handleResetAutoAssign = () => {
-    setAssignments(
-      autoAssignSubstitutes(selectedTeacherId, selectedDate, includeSupervision)
+    const nextAssignments = autoAssignCombinedSubstitutes(
+      absentTeacherIds,
+      selectedDate,
+      inc
     );
+    setIncludeSupervision(inc);
+    setAssignments(nextAssignments);
+    triggerPlannerAutoSave({
+      absentTeacherIds,
+      selectedDate,
+      reason,
+      studentTeacherName,
+      includeSupervision: inc,
+      assignments: nextAssignments,
+    });
   };
 
-  const handleAssignmentChange = (periodIndex: number, value: string) => {
-    setAssignments((prev) => ({
-      ...prev,
-      [periodIndex]: value,
-    }));
+  // จัดอัตโนมัติใหม่ทั้งตาราง
+  const handleResetAutoAssign = () => {
+    const nextAssignments = autoAssignCombinedSubstitutes(
+      absentTeacherIds,
+      selectedDate,
+      includeSupervision
+    );
+    setAssignments(nextAssignments);
+    triggerPlannerAutoSave({
+      absentTeacherIds,
+      selectedDate,
+      reason,
+      studentTeacherName,
+      includeSupervision,
+      assignments: nextAssignments,
+    });
+  };
+
+  // เปลี่ยนผู้สอนแทนรายคาบในตารางเดียวกัน
+  const handleAssignmentChange = (
+    slotKey: string,
+    periodIndex: number,
+    value: string
+  ) => {
+    const next: Record<string, string> = {
+      ...assignments,
+      [slotKey]: value,
+    };
+    if (absentTeacherIds.length === 1) {
+      next[String(periodIndex)] = value;
+    }
+    setAssignments(next);
+    triggerPlannerAutoSave({
+      absentTeacherIds,
+      selectedDate,
+      reason,
+      studentTeacherName,
+      includeSupervision,
+      assignments: next,
+    });
   };
 
   const handleViewTeacherTimetable = (teacherId: number) => {
@@ -205,58 +488,89 @@ export default function App() {
 
   const handleSelectTeacherFromDirectory = (teacherId: number) => {
     const idStr = String(teacherId);
-    setSelectedTeacherId(idStr);
-    setAssignments(autoAssignSubstitutes(idStr, selectedDate, includeSupervision));
+    const nextIds = [idStr];
+    const nextAssignments = autoAssignCombinedSubstitutes(
+      nextIds,
+      selectedDate,
+      includeSupervision
+    );
+    setAbsentTeacherIds(nextIds);
+    setAssignments(nextAssignments);
     setActiveTab("planner");
+    triggerPlannerAutoSave({
+      absentTeacherIds: nextIds,
+      selectedDate,
+      reason,
+      studentTeacherName,
+      includeSupervision,
+      assignments: nextAssignments,
+    });
   };
 
-  // CRUD: เพิ่ม / แก้ไขครู
+  // CRUD: เพิ่ม / แก้ไขครู (บันทึกลงฐานข้อมูลกลางอัตโนมัติทันที)
   const handleSaveTeacher = async (teacherRecord: TeacherRecord) => {
+    setAutoSaveState("saving");
     const updated = await upsertTeacherInDatabase(teacherRecord, teachers);
     setTeachers(updated);
-    // คำนวณการจัดสอนแทนใหม่หากกระทบครูที่เลือกอยู่
-    setAssignments(
-      autoAssignSubstitutes(selectedTeacherId, selectedDate, includeSupervision)
+    const nextAssignments = autoAssignCombinedSubstitutes(
+      absentTeacherIds,
+      selectedDate,
+      includeSupervision
     );
+    setAssignments(nextAssignments);
+    setAutoSaveState("saved");
   };
 
-  // CRUD: ลบครู
+  // CRUD: ลบครู (ลบจากฐานข้อมูลกลางอัตโนมัติทันที)
   const handleDeleteTeacher = async (teacherId: number) => {
+    setAutoSaveState("saving");
     const updated = await removeTeacherFromDatabase(teacherId, teachers);
     setTeachers(updated);
-    if (String(teacherId) === selectedTeacherId) {
-      const nextDefaultId = updated[0] ? String(updated[0].id) : "";
-      setSelectedTeacherId(nextDefaultId);
-      setAssignments(
-        autoAssignSubstitutes(nextDefaultId, selectedDate, includeSupervision)
-      );
-    } else {
-      setAssignments(
-        autoAssignSubstitutes(selectedTeacherId, selectedDate, includeSupervision)
-      );
-    }
+    const remainingIds = absentTeacherIds.filter((id) => id !== String(teacherId));
+    const nextIds =
+      remainingIds.length > 0
+        ? remainingIds
+        : updated[0]
+        ? [String(updated[0].id)]
+        : [];
+    const nextAssignments = autoAssignCombinedSubstitutes(
+      nextIds,
+      selectedDate,
+      includeSupervision
+    );
+    setAbsentTeacherIds(nextIds);
+    setAssignments(nextAssignments);
+    setAutoSaveState("saved");
   };
 
   // CRUD: กู้คืนข้อมูลเริ่มต้นจาก PDF ทั้ง 31 ท่าน
   const handleResetDefaultTeachers = async () => {
+    setAutoSaveState("saving");
     const updated = await syncAllTeachersToCloud(INITIAL_TEACHERS);
     setTeachers(updated);
-    setAssignments(
-      autoAssignSubstitutes(selectedTeacherId, selectedDate, includeSupervision)
+    const nextAssignments = autoAssignCombinedSubstitutes(
+      absentTeacherIds,
+      selectedDate,
+      includeSupervision
     );
+    setAssignments(nextAssignments);
+    setAutoSaveState("saved");
   };
 
-  // CRUD: บันทึกใบสอนแทนปัจจุบันลงฐานข้อมูล
+  // CRUD: บันทึกใบสอนแทนปัจจุบันลงฐานข้อมูลกลาง
   const handleSaveCurrentSubstituteRecord = async () => {
-    const absent = getTeacherById(selectedTeacherId);
-    if (!absent) return;
-    const recordId = `rec_${absent.id}_${selectedDate.replace(/[^0-9]/g, "")}`;
+    const combinedHeader = buildCombinedTeacherHeader(absentTeacherIds);
+    if (!combinedHeader) return;
+    setAutoSaveState("saving");
+    const idsPart = absentTeacherIds.join("-");
+    const recordId = `rec_${idsPart}_${selectedDate.replace(/[^0-9]/g, "")}`;
     const updatedRecords = await upsertSubstituteRecordInDatabase(
       {
         recordId,
-        absentTeacherId: absent.id,
-        absentTeacherName: absent.n,
-        absentTeacherGroup: absent.pdfGroup,
+        absentTeacherId: combinedHeader.id,
+        absentTeacherIds: [...absentTeacherIds],
+        absentTeacherName: combinedHeader.n,
+        absentTeacherGroup: combinedHeader.pdfGroup,
         selectedDate,
         reason,
         studentTeacherName,
@@ -266,31 +580,39 @@ export default function App() {
       savedRecords
     );
     setSavedRecords(updatedRecords);
+    setAutoSaveState("saved");
   };
 
   // CRUD: โหลดใบสอนแทนที่บันทึกไว้กลับมาแก้ไข/พิมพ์
   const handleLoadSubstituteRecord = (record: SavedSubstituteRecord) => {
-    setSelectedTeacherId(String(record.absentTeacherId));
+    const loadedIds =
+      record.absentTeacherIds && record.absentTeacherIds.length > 0
+        ? record.absentTeacherIds
+        : [String(record.absentTeacherId)];
+    const loadedAssignments = { ...record.assignments };
+    setAbsentTeacherIds(loadedIds);
     setSelectedDate(record.selectedDate);
     setReason(record.reason);
     setStudentTeacherName(record.studentTeacherName);
     setIncludeSupervision(record.includeSupervision);
-    setAssignments({ ...record.assignments });
+    setAssignments(loadedAssignments);
     setActiveTab("planner");
+    triggerPlannerAutoSave({
+      absentTeacherIds: loadedIds,
+      selectedDate: record.selectedDate,
+      reason: record.reason,
+      studentTeacherName: record.studentTeacherName,
+      includeSupervision: record.includeSupervision,
+      assignments: loadedAssignments,
+    });
   };
 
   // CRUD: ลบใบสอนแทนที่บันทึกไว้
   const handleDeleteSubstituteRecord = async (recordId: string) => {
+    setAutoSaveState("saving");
     const updated = await removeSubstituteRecordFromDatabase(recordId, savedRecords);
     setSavedRecords(updated);
-  };
-
-  const handleSignIn = async () => {
-    await signInWithGoogle();
-  };
-
-  const handleSignOut = async () => {
-    await signOutUser();
+    setAutoSaveState("saved");
   };
 
   return (
@@ -310,14 +632,16 @@ export default function App() {
         {activeTab === "planner" && (
           <SubstitutePlanner
             teachers={teachers}
-            selectedTeacherId={selectedTeacherId}
-            onChangeTeacherId={handleTeacherChange}
+            absentTeacherIds={absentTeacherIds}
+            onChangePrimaryTeacherId={handlePrimaryTeacherChange}
+            onAddAbsentTeacher={handleAddAbsentTeacher}
+            onRemoveAbsentTeacher={handleRemoveAbsentTeacher}
             selectedDate={selectedDate}
             onChangeDate={handleDateChange}
             reason={reason}
-            onChangeReason={setReason}
+            onChangeReason={handleReasonChange}
             studentTeacherName={studentTeacherName}
-            onChangeStudentTeacherName={setStudentTeacherName}
+            onChangeStudentTeacherName={handleStudentTeacherNameChange}
             assignments={assignments}
             onChangeAssignment={handleAssignmentChange}
             onResetAutoAssign={handleResetAutoAssign}
@@ -329,6 +653,7 @@ export default function App() {
             onLoadSavedRecord={handleLoadSubstituteRecord}
             onDeleteSavedRecord={handleDeleteSubstituteRecord}
             onOpenDatabaseTab={() => setActiveTab("database")}
+            autoSaveState={autoSaveState}
           />
         )}
 
@@ -359,9 +684,6 @@ export default function App() {
           <DatabaseManagerView
             teachers={teachers}
             savedRecords={savedRecords}
-            currentUser={currentUser}
-            onSignIn={handleSignIn}
-            onSignOut={handleSignOut}
             onOpenAddTeacher={() => {
               setEditingTeacher(null);
               setEditorModalOpen(true);

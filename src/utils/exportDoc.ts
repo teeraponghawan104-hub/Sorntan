@@ -198,8 +198,16 @@ function drawFittedCellLine(
   ctx.fillText(text, x, y);
 }
 
+function formatAbsentTeacherLabel(absentTeacher: TeacherRecord): string {
+  const name = String(absentTeacher.n || "").trim();
+  if (/^\d{3}\s/.test(name)) {
+    return name;
+  }
+  return `${absentTeacher.id} ${name}`;
+}
+
 /**
- * วาดใบสอนแทนลงบน HTML5 Canvas 2D โดยตรงด้วยความละเอียดสูง (2x A4 = 1588x2246 px)
+ * วาดใบสอนแทนลงบน HTML5 Canvas 2D โดยตรงด้วยความละเอียดสูง (2x A4 = 1588x2246 px หรือขยายความสูงอัตโนมัติเมื่อแถวเยอะ)
  * ออกแบบมาให้เรนเดอร์เหมือนกัน 100% ทั้งบน iOS (Safari / Messenger WebView), Android และ PC
  */
 export async function renderPaperToCanvas(
@@ -212,7 +220,58 @@ export async function renderPaperToCanvas(
 
   const scale = 2;
   const pageWidth = 794;
-  const pageHeight = 1123;
+  const marginX = 44;
+  const contentWidth = pageWidth - marginX * 2; // 706px
+  const fontStack = "'Sarabun', sans-serif";
+  const colWidths = [48, 100, 74, 44, 68, 188, 106, 78];
+
+  // วัดขนาดล่วงหน้าเพื่อคำนวณความสูงของหน้ากระดาษให้พอดีแม้มีครูลาหลายท่านในตารางเดียวกัน
+  const measureCanvas = document.createElement("canvas");
+  const measureCtx = measureCanvas.getContext("2d");
+  const isCompactMode = rows.length > 8;
+  const cellFontSize = isCompactMode ? 13 : 13.5;
+  const lineHeight = isCompactMode ? 18 : 20;
+  const minRowHeight = isCompactMode ? 34 : 38;
+
+  const d = getDayIndex(dateStr);
+  const dayLabel = d >= 0 ? DAYS[d] : "-";
+  const teacherLabel = formatAbsentTeacherLabel(absentTeacher);
+  const fullTeacherLine = `ครูผู้สอน ${teacherLabel}     วัน${dayLabel}ที่ ${formatThaiDate(
+    dateStr
+  )}`;
+
+  let teacherLines = [fullTeacherLine];
+  if (measureCtx) {
+    measureCtx.font = `400 16px ${fontStack}`;
+    if (measureCtx.measureText(fullTeacherLine).width > contentWidth) {
+      teacherLines = wrapCanvasText(measureCtx, fullTeacherLine, contentWidth, false);
+    }
+  }
+
+  let estimatedTableRowsHeight = 0;
+  for (const row of rows) {
+    let maxLines = 1;
+    if (measureCtx) {
+      measureCtx.font = `400 ${cellFontSize}px ${fontStack}`;
+      const subLines = wrapCanvasText(measureCtx, row.n, colWidths[5] - 16, false);
+      maxLines = Math.max(subLines.length, 1);
+    }
+    estimatedTableRowsHeight += Math.max(minRowHeight, maxLines * lineHeight + (isCompactMode ? 12 : 16));
+  }
+
+  const estimatedTotalHeight =
+    40 + // top margin
+    112 + // logo + gap
+    30 + // school title
+    34 + // subtitle
+    teacherLines.length * 25 + // teacher line(s)
+    24 + // reason line
+    38 + // table header
+    estimatedTableRowsHeight + // table rows
+    (isCompactMode ? 42 : 54) + // gap before signature
+    95; // signature block + bottom margin
+
+  const pageHeight = Math.max(1123, estimatedTotalHeight);
 
   const canvas = document.createElement("canvas");
   canvas.width = pageWidth * scale;
@@ -228,10 +287,6 @@ export async function renderPaperToCanvas(
   // พื้นหลังสีขาว A4
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, pageWidth, pageHeight);
-
-  const marginX = 44;
-  const contentWidth = pageWidth - marginX * 2; // 706px
-  const fontStack = "'Sarabun', sans-serif";
 
   // ใช้ textBaseline = "alphabetic" เสมอ เพื่อป้องกันบั๊ก textBaseline="middle" ของ iOS WebKit ที่ทำให้สระไทยลอยหรือจม
   ctx.textBaseline = "alphabetic";
@@ -276,24 +331,21 @@ export async function renderPaperToCanvas(
   );
   cursorY += 34;
 
-  // 3. ข้อมูลครูที่ลาและเหตุผล
-  const d = getDayIndex(dateStr);
-  const dayLabel = d >= 0 ? DAYS[d] : "-";
-
+  // 3. ข้อมูลครูที่ลาและเหตุผล (รองรับทั้งครู 1 ท่าน และหลายท่านในตารางเดียวกัน)
   ctx.textAlign = "left";
-  drawFittedCellLine(
-    ctx,
-    `ครูผู้สอน ${absentTeacher.id} ${absentTeacher.n}     วัน${dayLabel}ที่ ${formatThaiDate(
-      dateStr
-    )}`,
-    marginX,
-    cursorY,
-    contentWidth,
-    16.5,
-    "400",
-    fontStack
-  );
-  cursorY += 26;
+  teacherLines.forEach((line) => {
+    drawFittedCellLine(
+      ctx,
+      line,
+      marginX,
+      cursorY,
+      contentWidth,
+      16,
+      "400",
+      fontStack
+    );
+    cursorY += 25;
+  });
 
   drawFittedCellLine(
     ctx,
@@ -301,7 +353,7 @@ export async function renderPaperToCanvas(
     marginX,
     cursorY,
     contentWidth,
-    16.5,
+    16,
     "400",
     fontStack
   );
@@ -309,7 +361,6 @@ export async function renderPaperToCanvas(
 
   // 4. วาดตาราง 8 คอลัมน์ (ผลรวมความกว้าง = 706px พอดี)
   // [คาบที่ 48, เวลา 100, รหัสวิชา 74, ชั้น 44, ห้องเรียน 68, ผู้สอนแทน 188, กลุ่มสาระ 106, ลายมือชื่อ 78]
-  const colWidths = [48, 100, 74, 44, 68, 188, 106, 78];
   const headers = [
     "คาบที่",
     "เวลา",
@@ -351,7 +402,7 @@ export async function renderPaperToCanvas(
   }
   cursorY += headerHeight;
 
-  // วาดแถวข้อมูลแต่ละคาบ
+  // วาดแถวข้อมูลแต่ละคาบในตารางเดียวกัน
   for (const row of rows) {
     const cellValues = [
       String(row.p),
@@ -364,7 +415,6 @@ export async function renderPaperToCanvas(
       "",
     ];
 
-    const cellFontSize = 13.5;
     ctx.font = `400 ${cellFontSize}px ${fontStack}`;
 
     // เฉพาะคอลัมน์ผู้สอนแทน (index 5) ที่อนุญาตให้ตัดบรรทัดตามเว้นวรรคหากชื่อยาวมาก
@@ -372,8 +422,10 @@ export async function renderPaperToCanvas(
       idx === 5 ? wrapCanvasText(ctx, val, colWidths[idx] - 16, false) : [val]
     );
     const maxLines = Math.max(...wrappedCells.map((lines) => lines.length), 1);
-    const lineHeight = 20;
-    const rowHeight = Math.max(38, maxLines * lineHeight + 16);
+    const rowHeight = Math.max(
+      minRowHeight,
+      maxLines * lineHeight + (isCompactMode ? 12 : 16)
+    );
 
     let x = marginX;
     for (let i = 0; i < cellValues.length; i++) {
@@ -422,7 +474,7 @@ export async function renderPaperToCanvas(
   }
 
   // 5. ส่วนลงนามด้านล่าง (แบ่ง 3 คอลัมน์เท่าๆ กัน ไม่เบียดกันบน iOS)
-  cursorY += 54;
+  cursorY += isCompactMode ? 42 : 54;
   ctx.textAlign = "center";
   ctx.textBaseline = "alphabetic";
 
@@ -471,14 +523,23 @@ export async function renderPaperToCanvas(
  * - กำหนดขนาดฟอนต์มาตรฐานสากล (11pt / 10.5pt สำหรับตาราง) และตั้งค่า <w:noWrap/> ในคอลัมน์สั้น
  *   เพื่อไม่ให้ตัวอักษรล้นหรือตารางพังเมื่อเปิดบน iPhone/iPad ที่ไม่มีฟอนต์ TH Sarabun PSK
  */
-export async function generateDocxBlob(
+export interface SubstituteSheetData {
+  absentTeacher: TeacherRecord;
+  dateStr: string;
+  reason: string;
+  rows: SubstituteRow[];
+}
+
+function buildDocxSheetBodyXml(
   absentTeacher: TeacherRecord,
   dateStr: string,
   reason: string,
-  rows: SubstituteRow[]
-): Promise<Blob> {
+  rows: SubstituteRow[],
+  docPrId: number = 1
+): string {
   const d = getDayIndex(dateStr);
   const dayLabel = d >= 0 ? DAYS[d] : "-";
+  const teacherLabel = formatAbsentTeacherLabel(absentTeacher);
   const FN =
     '<w:rFonts w:ascii="Sarabun" w:hAnsi="Sarabun" w:cs="TH Sarabun New" w:eastAsia="Sarabun"/>';
 
@@ -494,7 +555,6 @@ export async function generateDocxBlob(
       t
     )}</w:t></w:r></w:p>`;
 
-  // ความกว้างรวม 10200 dxa (พอดีกระดาษ A4 แนวตั้ง)
   const W = [700, 1480, 1080, 640, 980, 2680, 1520, 1120];
   const H = [
     "คาบที่",
@@ -508,7 +568,6 @@ export async function generateDocxBlob(
   ];
 
   const C = (t: string, i: number, b?: boolean | number) => {
-    // ห้ามตัดคำตกบรรทัดสำหรับคอลัมน์สั้น (คาบที่, เวลา, รหัสวิชา, ชั้น, ห้องเรียน, กลุ่มสาระ)
     const noWrap = i !== 5 ? "<w:noWrap/>" : "";
     return `<w:tc><w:tcPr><w:tcW w:w="${W[i]}" w:type="dxa"/>${noWrap}${
       b ? '<w:shd w:val="clear" w:color="auto" w:fill="E8EDF7"/>' : ""
@@ -516,7 +575,7 @@ export async function generateDocxBlob(
       c: i !== 5,
       b,
       a: 0,
-      z: b ? 21 : 20, // 10.5pt สำหรับหัวตาราง, 10pt สำหรับข้อมูลตาราง (ไม่ล้นบน iOS QuickLook / Word Mobile)
+      z: b ? 21 : 20,
     })}</w:tc>`;
   };
 
@@ -551,9 +610,9 @@ export async function generateDocxBlob(
 
   const cx = 800000;
   const cy = Math.round((cx * 360) / 346);
-  const lg = `<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="1" name="logo"/><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="0" name="logo.png"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="rId1"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>`;
+  const lg = `<w:p><w:pPr><w:jc w:val="center"/></w:pPr><w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="${docPrId}" name="logo_${docPrId}"/><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="0" name="logo.png"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="rId1"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>`;
 
-  const body =
+  return (
     lg +
     P("โรงเรียนวรคุณอุปถัมภ์", { c: 1, b: 1, z: 32 }) +
     P(
@@ -561,7 +620,7 @@ export async function generateDocxBlob(
       { c: 1, b: 1, z: 26, a: 140 }
     ) +
     P(
-      `ครูผู้สอน ${absentTeacher.id} ${absentTeacher.n}    วัน${dayLabel}ที่ ${formatThaiDate(
+      `ครูผู้สอน ${teacherLabel}    วัน${dayLabel}ที่ ${formatThaiDate(
         dateStr
       )}`,
       { z: 23 }
@@ -572,7 +631,23 @@ export async function generateDocxBlob(
     ) +
     tb +
     P("", { a: 280 }) +
-    sigTable;
+    sigTable
+  );
+}
+
+async function generateMultiDocxBlob(sheets: SubstituteSheetData[]): Promise<Blob> {
+  const pageBreakXml = '<w:p><w:r><w:br w:type="page"/></w:r></w:p>';
+  const body = sheets
+    .map((sheet, idx) =>
+      buildDocxSheetBodyXml(
+        sheet.absentTeacher,
+        sheet.dateStr,
+        sheet.reason,
+        sheet.rows,
+        idx + 1
+      )
+    )
+    .join(pageBreakXml);
 
   const z = new JSZip();
   const R =
@@ -608,6 +683,15 @@ export async function generateDocxBlob(
   });
 }
 
+export async function generateDocxBlob(
+  absentTeacher: TeacherRecord,
+  dateStr: string,
+  reason: string,
+  rows: SubstituteRow[]
+): Promise<Blob> {
+  return generateMultiDocxBlob([{ absentTeacher, dateStr, reason, rows }]);
+}
+
 export async function exportSubstituteDocument(
   format: "word" | "pdf" | "image",
   absentTeacher: TeacherRecord,
@@ -616,7 +700,12 @@ export async function exportSubstituteDocument(
   rows: SubstituteRow[],
   _paperElement: HTMLElement | null
 ): Promise<void> {
-  const baseFilename = `ใบสอนแทน_${absentTeacher.id}_${dateStr}`;
+  const matchedIds = String(absentTeacher.n || "").match(/\b\d{3}\b/g);
+  const idPart =
+    matchedIds && matchedIds.length > 1
+      ? matchedIds.join("-")
+      : String(absentTeacher.id);
+  const baseFilename = `ใบสอนแทน_${idPart}_${dateStr}`;
 
   if (format === "word") {
     const blob = await generateDocxBlob(absentTeacher, dateStr, reason, rows);
@@ -648,3 +737,86 @@ export async function exportSubstituteDocument(
   const pdfBlob = pdf.output("blob");
   await triggerBrowserDownload(`${baseFilename}.pdf`, pdfBlob, "application/pdf");
 }
+
+/**
+ * ส่งออกใบสอนแทนรวมทุกคนที่ลาในวันเดียวกัน (Multi-page Word / Multi-page PDF / รูปภาพรวมทุกใบ)
+ */
+export async function exportMultipleSubstituteDocuments(
+  format: "word" | "pdf" | "image",
+  sheets: SubstituteSheetData[],
+  dateStr: string
+): Promise<void> {
+  if (sheets.length === 0) return;
+  if (sheets.length === 1) {
+    const s = sheets[0];
+    return exportSubstituteDocument(
+      format,
+      s.absentTeacher,
+      s.dateStr,
+      s.reason,
+      s.rows,
+      null
+    );
+  }
+
+  const idsLabel = sheets.map((s) => s.absentTeacher.id).join("-");
+  const baseFilename = `ใบสอนแทนรวม_${sheets.length}ท่าน_${idsLabel}_${dateStr}`;
+
+  if (format === "word") {
+    const blob = await generateMultiDocxBlob(sheets);
+    await triggerBrowserDownload(
+      `${baseFilename}.docx`,
+      blob,
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    );
+    return;
+  }
+
+  const canvases: HTMLCanvasElement[] = [];
+  for (const s of sheets) {
+    const c = await renderPaperToCanvas(s.absentTeacher, s.dateStr, s.reason, s.rows);
+    canvases.push(c);
+  }
+
+  if (format === "pdf") {
+    const pdf = new jsPDF("p", "mm", "a4");
+    canvases.forEach((canvas, idx) => {
+      if (idx > 0) pdf.addPage();
+      const imgData = canvas.toDataURL("image/png");
+      const pdfWidth = 210;
+      const pdfHeight = (pdfWidth * canvas.height) / canvas.width;
+      pdf.addImage(imgData, "PNG", 0, 0, pdfWidth, pdfHeight);
+    });
+    const pdfBlob = pdf.output("blob");
+    await triggerBrowserDownload(`${baseFilename}.pdf`, pdfBlob, "application/pdf");
+    return;
+  }
+
+  // สำหรับรูปภาพรวมหลายใบ: ต่อกันในแนวตั้งพร้อมเส้นคั่นบางๆ
+  const gap = 24;
+  const totalWidth = Math.max(...canvases.map((c) => c.width));
+  const totalHeight =
+    canvases.reduce((acc, c) => acc + c.height, 0) + gap * (canvases.length - 1);
+
+  const combinedCanvas = document.createElement("canvas");
+  combinedCanvas.width = totalWidth;
+  combinedCanvas.height = totalHeight;
+  const ctx = combinedCanvas.getContext("2d");
+  if (!ctx) throw new Error("ไม่สามารถสร้าง Canvas รวมรูปภาพได้");
+
+  ctx.fillStyle = "#e2e8f0";
+  ctx.fillRect(0, 0, totalWidth, totalHeight);
+
+  let yOffset = 0;
+  for (const c of canvases) {
+    ctx.drawImage(c, 0, yOffset);
+    yOffset += c.height + gap;
+  }
+
+  const blob = await new Promise<Blob | null>((resolve) =>
+    combinedCanvas.toBlob(resolve, "image/png")
+  );
+  if (!blob) throw new Error("ไม่สามารถสร้างไฟล์รูปภาพได้");
+  await triggerBrowserDownload(`${baseFilename}.png`, blob, "image/png");
+}
+

@@ -10,10 +10,10 @@ describe("Firestore Security Rules Static & Invariant Verification", () => {
     assert.ok(rules.includes("match /{document=**}"), "Must contain global catch-all");
     assert.ok(rules.includes("allow read, write: if false;"), "Must deny all by default");
 
-    // 2. Verified user check
+    // 2. Shared school workspace scope check
     assert.ok(
-      rules.includes("request.auth.token.email_verified == true"),
-      "Must require verified email"
+      rules.includes("ownerId == 'worakhun_shared'"),
+      "Must enforce shared workspace scope"
     );
 
     // 3. Path variable hardening

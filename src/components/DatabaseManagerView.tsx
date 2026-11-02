@@ -4,8 +4,6 @@ import {
   Database,
   Edit3,
   FileText,
-  LogIn,
-  LogOut,
   Plus,
   RotateCcw,
   Search,
@@ -14,7 +12,6 @@ import {
   CheckCircle2,
   AlertTriangle,
 } from "lucide-react";
-import { User } from "firebase/auth";
 import { DEPARTMENT_GROUPS, TeacherRecord } from "../data/teachers";
 import { formatRoomLabel, formatThaiDate, resolveSubstitute } from "../utils/scheduler";
 import { SavedSubstituteRecord } from "../utils/databaseStore";
@@ -22,9 +19,6 @@ import { SavedSubstituteRecord } from "../utils/databaseStore";
 interface DatabaseManagerViewProps {
   teachers: TeacherRecord[];
   savedRecords: SavedSubstituteRecord[];
-  currentUser: User | null;
-  onSignIn: () => Promise<void>;
-  onSignOut: () => Promise<void>;
   onOpenAddTeacher: () => void;
   onOpenEditTeacher: (teacher: TeacherRecord) => void;
   onDeleteTeacher: (teacherId: number) => Promise<void>;
@@ -37,9 +31,6 @@ interface DatabaseManagerViewProps {
 export const DatabaseManagerView: React.FC<DatabaseManagerViewProps> = ({
   teachers,
   savedRecords,
-  currentUser,
-  onSignIn,
-  onSignOut,
   onOpenAddTeacher,
   onOpenEditTeacher,
   onDeleteTeacher,
@@ -84,7 +75,7 @@ export const DatabaseManagerView: React.FC<DatabaseManagerViewProps> = ({
       const targetName = `${confirmDeleteTeacher.id} ${confirmDeleteTeacher.n}`;
       await onDeleteTeacher(confirmDeleteTeacher.id);
       setConfirmDeleteTeacher(null);
-      setStatusBanner({ text: `ลบข้อมูล "${targetName}" เรียบร้อยแล้ว`, type: "ok" });
+      setStatusBanner({ text: `ลบข้อมูล "${targetName}" และบันทึกอัตโนมัติเรียบร้อยแล้ว`, type: "ok" });
     } catch (err: unknown) {
       setStatusBanner({
         text: err instanceof Error ? err.message : "ลบข้อมูลไม่สำเร็จ",
@@ -101,7 +92,7 @@ export const DatabaseManagerView: React.FC<DatabaseManagerViewProps> = ({
       await onResetDefaultTeachers();
       setConfirmReset(false);
       setStatusBanner({
-        text: "กู้คืนข้อมูลครูและนักศึกษาฝึกสอนทั้ง 31 ท่านจาก PDF เรียบร้อยแล้ว",
+        text: "กู้คืนข้อมูลครูและนักศึกษาฝึกสอนทั้ง 31 ท่านจาก PDF และซิงก์อัตโนมัติเรียบร้อยแล้ว",
         type: "ok",
       });
     } catch (err: unknown) {
@@ -119,7 +110,7 @@ export const DatabaseManagerView: React.FC<DatabaseManagerViewProps> = ({
       setBusy(true);
       await onDeleteSubstituteRecord(recordId);
       setConfirmDeleteRecordId(null);
-      setStatusBanner({ text: "ลบประวัติใบสอนแทนเรียบร้อยแล้ว", type: "ok" });
+      setStatusBanner({ text: "ลบประวัติใบสอนแทนและอัปเดตฐานข้อมูลกลางเรียบร้อยแล้ว", type: "ok" });
     } catch (err: unknown) {
       setStatusBanner({
         text: err instanceof Error ? err.message : "ลบใบสอนแทนไม่สำเร็จ",
@@ -139,7 +130,7 @@ export const DatabaseManagerView: React.FC<DatabaseManagerViewProps> = ({
             <div className="flex items-center gap-2 flex-wrap">
               <Database className="w-5 h-5 text-[#1b4fb8] dark:text-[#6c97ff]" />
               <h2 className="text-lg sm:text-xl font-bold text-[#0f2150] dark:text-[#e9eefc]">
-                จัดการฐานข้อมูล (เพิ่ม · แก้ไข · ลบ ข้อมูลครูและใบสอนแทน)
+                จัดการฐานข้อมูลกลาง (เห็นตรงกันทุกคน · บันทึกอัตโนมัติ)
               </h2>
             </div>
             <p className="text-xs sm:text-sm text-[#51608a] dark:text-[#9fb0dc]">
@@ -149,31 +140,12 @@ export const DatabaseManagerView: React.FC<DatabaseManagerViewProps> = ({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            {currentUser ? (
-              <div className="flex flex-wrap items-center gap-2 bg-[#eaf0fa] dark:bg-[#0b1330] px-3 py-1.5 rounded-lg border border-[#c9d4ec] dark:border-[#2a3a6e]">
-                <Cloud className="w-4 h-4 text-[#0b7a4b] dark:text-[#4fd39a] shrink-0" />
-                <span className="text-xs font-semibold text-[#0f2150] dark:text-[#e9eefc]">
-                  ซิงก์ Cloud: {currentUser.email}
-                </span>
-                <button
-                  type="button"
-                  onClick={onSignOut}
-                  className="flex items-center gap-1 px-2 py-1 rounded bg-white dark:bg-[#14204a] text-xs font-semibold text-red-600 dark:text-red-400 hover:bg-red-50 cursor-pointer"
-                >
-                  <LogOut className="w-3.5 h-3.5" />
-                  <span>ออกจากระบบ</span>
-                </button>
-              </div>
-            ) : (
-              <button
-                type="button"
-                onClick={onSignIn}
-                className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-[#1b4fb8] dark:border-[#6c97ff] text-[#1b4fb8] dark:text-[#6c97ff] hover:bg-[#eaf0fa] dark:hover:bg-blue-950 text-xs sm:text-sm font-bold transition-colors cursor-pointer"
-              >
-                <LogIn className="w-4 h-4 shrink-0" />
-                <span>เข้าสู่ระบบ Google (ซิงก์ Cloud Database)</span>
-              </button>
-            )}
+            <div className="flex items-center gap-1.5 bg-emerald-50 dark:bg-emerald-950/50 px-3 py-2 rounded-lg border border-emerald-200 dark:border-emerald-800">
+              <Cloud className="w-4 h-4 text-[#0b7a4b] dark:text-[#4fd39a] shrink-0" />
+              <span className="text-xs font-bold text-[#0b7a4b] dark:text-[#4fd39a]">
+                ซิงก์ฐานข้อมูลกลางอัตโนมัติ (ไม่ต้องล็อกอิน)
+              </span>
+            </div>
 
             <button
               type="button"
@@ -445,10 +417,15 @@ export const DatabaseManagerView: React.FC<DatabaseManagerViewProps> = ({
           ) : (
             <div className="divide-y divide-[#c9d4ec] dark:divide-[#2a3a6e]">
               {savedRecords.map((rec) => {
-                const assignedList = Object.entries(rec.assignments).map(([pStr, val]) => {
-                  const sub = resolveSubstitute(val, rec.studentTeacherName);
-                  return `คาบ ${Number(pStr) + 1}: ${sub.n}`;
-                });
+                const assignedList = Object.entries(rec.assignments)
+                  .filter(([k]) => k.includes("_") || !rec.absentTeacherIds || rec.absentTeacherIds.length <= 1)
+                  .map(([pStr, val]) => {
+                    const pNum = pStr.includes("_")
+                      ? Number(pStr.split("_")[1]) + 1
+                      : Number(pStr) + 1;
+                    const sub = resolveSubstitute(val, rec.studentTeacherName);
+                    return `คาบ ${pNum}: ${sub.n}`;
+                  });
 
                 return (
                   <div
@@ -458,7 +435,9 @@ export const DatabaseManagerView: React.FC<DatabaseManagerViewProps> = ({
                     <div className="space-y-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="font-bold text-base text-[#0f2150] dark:text-[#e9eefc]">
-                          {rec.absentTeacherId} {rec.absentTeacherName}
+                          {/^\d{3}\s/.test(rec.absentTeacherName)
+                            ? rec.absentTeacherName
+                            : `${rec.absentTeacherId} ${rec.absentTeacherName}`}
                         </span>
                         <span className="px-2 py-0.5 rounded bg-[#eaf0fa] dark:bg-[#0b1330] text-[#1b4fb8] dark:text-[#6c97ff] text-xs font-semibold">
                           วันที่ {formatThaiDate(rec.selectedDate)}
