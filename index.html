@@ -2,7 +2,7 @@
 <html lang="th">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=5.0, viewport-fit=cover" />
     <title>ระบบจัดสอนแทน โรงเรียนวรคุณอุปถัมภ์</title>
     <meta name="description" content="ระบบจัดครูสอนแทนและฐานข้อมูลตารางสอนครูครบถ้วน ภาคเรียนที่ 2 ปีการศึกษา 2569 โรงเรียนวรคุณอุปถัมภ์ พร้อมออกใบสอนแทน Word, PDF และรูปภาพ" />
     <meta property="og:title" content="ระบบจัดสอนแทน โรงเรียนวรคุณอุปถัมภ์" />
@@ -19,8 +19,13 @@
     <link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet" />
   </head>
   <body>
+    <!-- บังคับให้ iOS Safari / WebKit โหลดฟอนต์ภาษาไทย Sarabun ทั้งน้ำหนัก 400 และ 700 ทันทีที่เปิดหน้าเว็บ -->
+    <div aria-hidden="true" style="position:absolute;width:0;height:0;overflow:hidden;opacity:0;pointer-events:none;font-family:'Sarabun',sans-serif;">
+      <span style="font-weight:400">โรงเรียนวรคุณอุปถัมภ์ ตารางสอนแทน วิทยาศาสตร์ คณิตศาสตร์ 0123456789</span>
+      <span style="font-weight:600">โรงเรียนวรคุณอุปถัมภ์ ตารางสอนแทน วิทยาศาสตร์ คณิตศาสตร์ 0123456789</span>
+      <span style="font-weight:700">โรงเรียนวรคุณอุปถัมภ์ ตารางสอนแทน วิทยาศาสตร์ คณิตศาสตร์ 0123456789</span>
+    </div>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-

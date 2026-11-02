@@ -1,0 +1,209 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Safety Net: Default-Deny Catch-All
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Hardened Global Helpers
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+
+    function isBootstrappedAdmin() {
+      return isSignedIn() && request.auth.token.email == 'teeraponghawan104@gmail.com';
+    }
+
+    function isAdmin() {
+      return isBootstrappedAdmin() || (isSignedIn() && exists(/databases/$(database)/documents/admins/$(request.auth.uid)));
+    }
+
+    // Validation Blueprint: Teacher
+    function isValidTeacher(data) {
+      return data.keys().hasAll([
+        'id',
+        'n',
+        'g',
+        'pdfGroup',
+        'r',
+        'totalHours',
+        'coursesSummary',
+        'otherSummary',
+        's',
+        'isStudentTeacher',
+        'ownerId',
+        'createdAt',
+        'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'id',
+        'n',
+        'g',
+        'pdfGroup',
+        'r',
+        'totalHours',
+        'coursesSummary',
+        'otherSummary',
+        's',
+        'isStudentTeacher',
+        'ownerId',
+        'createdAt',
+        'updatedAt'
+      ]) &&
+      data.id is number && data.id >= 1 && data.id <= 99999 &&
+      data.n is string && data.n.size() >= 1 && data.n.size() <= 120 &&
+      data.g is string && data.g.size() >= 1 && data.g.size() <= 60 &&
+      data.pdfGroup is string && data.pdfGroup.size() >= 1 && data.pdfGroup.size() <= 60 &&
+      data.r is string && data.r.size() >= 1 && data.r.size() <= 60 &&
+      data.totalHours is number && data.totalHours >= 0 && data.totalHours <= 60 &&
+      data.coursesSummary is list && data.coursesSummary.size() <= 15 &&
+      (data.coursesSummary.size() == 0 || (data.coursesSummary[0] is string && data.coursesSummary[0].size() <= 200)) &&
+      data.otherSummary is string && data.otherSummary.size() <= 300 &&
+      data.s is string && data.s.size() <= 1200 &&
+      data.isStudentTeacher is bool &&
+      data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 && data.ownerId.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.ownerId == request.auth.uid &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint: SubstituteRecord
+    function isValidSubstituteRecord(data) {
+      return data.keys().hasAll([
+        'recordId',
+        'absentTeacherId',
+        'absentTeacherName',
+        'absentTeacherGroup',
+        'selectedDate',
+        'reason',
+        'studentTeacherName',
+        'includeSupervision',
+        'assignmentsJson',
+        'ownerId',
+        'createdAt',
+        'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'recordId',
+        'absentTeacherId',
+        'absentTeacherName',
+        'absentTeacherGroup',
+        'selectedDate',
+        'reason',
+        'studentTeacherName',
+        'includeSupervision',
+        'assignmentsJson',
+        'ownerId',
+        'createdAt',
+        'updatedAt'
+      ]) &&
+      data.recordId is string && data.recordId.size() >= 1 && data.recordId.size() <= 128 && data.recordId.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.absentTeacherId is number && data.absentTeacherId >= 1 && data.absentTeacherId <= 99999 &&
+      data.absentTeacherName is string && data.absentTeacherName.size() >= 1 && data.absentTeacherName.size() <= 120 &&
+      data.absentTeacherGroup is string && data.absentTeacherGroup.size() >= 1 && data.absentTeacherGroup.size() <= 60 &&
+      data.selectedDate is string && data.selectedDate.size() >= 8 && data.selectedDate.size() <= 20 &&
+      data.reason is string && data.reason.size() >= 1 && data.reason.size() <= 200 &&
+      data.studentTeacherName is string && data.studentTeacherName.size() <= 120 &&
+      data.includeSupervision is bool &&
+      data.assignmentsJson is string && data.assignmentsJson.size() <= 400 &&
+      data.ownerId is string && data.ownerId.size() >= 1 && data.ownerId.size() <= 128 && data.ownerId.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.ownerId == request.auth.uid &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
+    // Validation Blueprint: Admin
+    function isValidAdmin(data) {
+      return data.keys().hasAll(['uid', 'createdAt']) &&
+        data.keys().hasOnly(['uid', 'createdAt']) &&
+        data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128 && data.uid.matches('^[a-zA-Z0-9_\\-]+$') &&
+        data.createdAt is timestamp;
+    }
+
+    // Collection: /teachers/{teacherId}
+    match /teachers/{teacherId} {
+      allow get: if isSignedIn() && isValidId(teacherId) && (existing().ownerId == request.auth.uid || isBootstrappedAdmin());
+      allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isBootstrappedAdmin());
+      allow create: if isSignedIn() && isValidId(teacherId) && isValidTeacher(incoming()) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isSignedIn() && isValidId(teacherId) && isValidTeacher(incoming()) &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          isAdmin() ||
+          (existing().ownerId == request.auth.uid &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'id',
+              'n',
+              'g',
+              'pdfGroup',
+              'r',
+              'totalHours',
+              'coursesSummary',
+              'otherSummary',
+              's',
+              'isStudentTeacher',
+              'updatedAt'
+            ]))
+        );
+      allow delete: if isSignedIn() && isValidId(teacherId) && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+
+    // Collection: /substitute_records/{recordId}
+    match /substitute_records/{recordId} {
+      allow get: if isSignedIn() && isValidId(recordId) && (existing().ownerId == request.auth.uid || isBootstrappedAdmin());
+      allow list: if isSignedIn() && (resource.data.ownerId == request.auth.uid || isBootstrappedAdmin());
+      allow create: if isSignedIn() && isValidId(recordId) && isValidSubstituteRecord(incoming()) &&
+        incoming().recordId == recordId &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isSignedIn() && isValidId(recordId) && isValidSubstituteRecord(incoming()) &&
+        incoming().recordId == existing().recordId &&
+        incoming().ownerId == existing().ownerId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time && (
+          isAdmin() ||
+          (existing().ownerId == request.auth.uid &&
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'absentTeacherId',
+              'absentTeacherName',
+              'absentTeacherGroup',
+              'selectedDate',
+              'reason',
+              'studentTeacherName',
+              'includeSupervision',
+              'assignmentsJson',
+              'updatedAt'
+            ]))
+        );
+      allow delete: if isSignedIn() && isValidId(recordId) && (existing().ownerId == request.auth.uid || isAdmin());
+    }
+
+    // Collection: /admins/{adminId}
+    match /admins/{adminId} {
+      allow get: if isSignedIn() && isValidId(adminId) && (request.auth.uid == adminId || isBootstrappedAdmin());
+      allow list: if false;
+      allow create: if isBootstrappedAdmin() && isValidId(adminId) && isValidAdmin(incoming()) &&
+        incoming().uid == adminId &&
+        incoming().createdAt == request.time;
+      allow update: if isBootstrappedAdmin() && isValidId(adminId) && isValidAdmin(incoming()) &&
+        incoming().uid == existing().uid &&
+        incoming().createdAt == existing().createdAt;
+      allow delete: if isBootstrappedAdmin() && isValidId(adminId);
+    }
+  }
+}

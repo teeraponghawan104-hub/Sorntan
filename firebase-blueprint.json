@@ -1,0 +1,213 @@
+{
+  "entities": {
+    "Teacher": {
+      "title": "Teacher",
+      "description": "Teacher or student teacher record with master timetable schedule for Worakhun Uppatham School",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "number",
+          "description": "Teacher numeric code (e.g., 102, 205, 307)"
+        },
+        "n": {
+          "type": "string",
+          "description": "Full name in Thai",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "g": {
+          "type": "string",
+          "description": "Primary department group used for substitute matching",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "pdfGroup": {
+          "type": "string",
+          "description": "Department or unit displayed on the official PDF header",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "r": {
+          "type": "string",
+          "description": "Default classroom number or name",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "totalHours": {
+          "type": "number",
+          "description": "Total weekly hours"
+        },
+        "coursesSummary": {
+          "type": "array",
+          "description": "List of courses taught summary lines",
+          "maxLength": 15
+        },
+        "otherSummary": {
+          "type": "string",
+          "description": "Summary of PLC and other school activities",
+          "maxLength": 300
+        },
+        "s": {
+          "type": "string",
+          "description": "Encoded 5-day x 7-period schedule separated by | and ,",
+          "maxLength": 1200
+        },
+        "isStudentTeacher": {
+          "type": "boolean",
+          "description": "Whether the person is a student teacher"
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "UID of the user who owns/manages this teacher record",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server update timestamp"
+        }
+      },
+      "required": [
+        "id",
+        "n",
+        "g",
+        "pdfGroup",
+        "r",
+        "totalHours",
+        "coursesSummary",
+        "otherSummary",
+        "s",
+        "isStudentTeacher",
+        "ownerId",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "SubstituteRecord": {
+      "title": "SubstituteRecord",
+      "description": "Saved substitute teaching assignment sheet for a specific teacher and date",
+      "type": "object",
+      "properties": {
+        "recordId": {
+          "type": "string",
+          "description": "Unique document ID",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "absentTeacherId": {
+          "type": "number",
+          "description": "Numeric ID of the absent teacher"
+        },
+        "absentTeacherName": {
+          "type": "string",
+          "description": "Name of the absent teacher",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "absentTeacherGroup": {
+          "type": "string",
+          "description": "Department group of the absent teacher",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "selectedDate": {
+          "type": "string",
+          "description": "ISO date string YYYY-MM-DD",
+          "minLength": 8,
+          "maxLength": 20
+        },
+        "reason": {
+          "type": "string",
+          "description": "Leave or official duty reason",
+          "minLength": 1,
+          "maxLength": 200
+        },
+        "studentTeacherName": {
+          "type": "string",
+          "description": "Optional custom student teacher name",
+          "maxLength": 120
+        },
+        "includeSupervision": {
+          "type": "boolean",
+          "description": "Whether supervision periods are included"
+        },
+        "assignmentsJson": {
+          "type": "string",
+          "description": "Compact period-to-substitute assignment mapping string (e.g. 0:t103,1:t308)",
+          "maxLength": 400
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "UID of the creator",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server update timestamp"
+        }
+      },
+      "required": [
+        "recordId",
+        "absentTeacherId",
+        "absentTeacherName",
+        "absentTeacherGroup",
+        "selectedDate",
+        "reason",
+        "studentTeacherName",
+        "includeSupervision",
+        "assignmentsJson",
+        "ownerId",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Admin": {
+      "title": "Admin",
+      "description": "Administrator user record",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/teachers/{teacherId}": {
+      "schema": { "$ref": "#/entities/Teacher" },
+      "description": "Stores teacher and student teacher profiles and 5x7 timetables"
+    },
+    "/substitute_records/{recordId}": {
+      "schema": { "$ref": "#/entities/SubstituteRecord" },
+      "description": "Stores saved substitute teaching assignment forms"
+    },
+    "/admins/{adminId}": {
+      "schema": { "$ref": "#/entities/Admin" },
+      "description": "Stores administrator UIDs for role-based access"
+    }
+  }
+}

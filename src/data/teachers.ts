@@ -559,12 +559,76 @@ export const TEACHERS: TeacherRecord[] = [
   },
 ];
 
+export function hydrateTeacherSchedule(t: TeacherRecord): TeacherRecord {
+  const days = (t.s || "")
+    .split("|")
+    .map((dayStr) => {
+      const cells = dayStr.split(",").map((cell) => cell.trim());
+      while (cells.length < 7) cells.push("");
+      return cells.slice(0, 7);
+    });
+  while (days.length < 5) {
+    days.push(["", "", "", "", "", "", ""]);
+  }
+  return {
+    ...t,
+    coursesSummary: Array.isArray(t.coursesSummary) ? [...t.coursesSummary] : [],
+    d: days.slice(0, 5),
+  };
+}
+
 // แปลงสตริง s เป็นเมทริกซ์ 5 วัน x 7 คาบ
 TEACHERS.forEach((t) => {
-  t.d = t.s.split("|").map((dayStr) => dayStr.split(",").map((cell) => cell.trim()));
+  const hydrated = hydrateTeacherSchedule(t);
+  t.d = hydrated.d;
 });
 
-export const REGULAR_TEACHERS = TEACHERS.filter((t) => !t.isStudentTeacher);
-export const STUDENT_TEACHERS = TEACHERS.filter((t) => Boolean(t.isStudentTeacher));
-export const DEPARTMENT_GROUPS = Array.from(new Set(TEACHERS.map((t) => t.g)));
+// เก็บสำเนาข้อมูลต้นฉบับจาก PDF ทั้ง 31 ท่าน สำหรับกู้คืนค่าเริ่มต้น
+export const INITIAL_TEACHERS: TeacherRecord[] = TEACHERS.map((t) => hydrateTeacherSchedule({ ...t }));
+
+export let REGULAR_TEACHERS = TEACHERS.filter((t) => !t.isStudentTeacher);
+export let STUDENT_TEACHERS = TEACHERS.filter((t) => Boolean(t.isStudentTeacher));
+export let DEPARTMENT_GROUPS = Array.from(
+  new Set([
+    "บริหาร",
+    "ภาษาไทย",
+    "คณิตศาสตร์",
+    "วิทยาศาสตร์",
+    "สังคมศึกษา",
+    "พลศึกษา",
+    "ศิลปะ",
+    "การงานอาชีพ",
+    "ภาษาต่างประเทศ",
+    ...TEACHERS.map((t) => t.g),
+  ])
+);
+
+/**
+ * อัปเดตรายชื่อครูในระบบแบบ Dynamic เมื่อมีการเพิ่ม/แก้ไข/ลบจากฐานข้อมูล
+ */
+export function setRuntimeTeachers(newTeachers: TeacherRecord[]): TeacherRecord[] {
+  const sorted = [...newTeachers]
+    .map((t) => hydrateTeacherSchedule(t))
+    .sort((a, b) => a.id - b.id);
+
+  TEACHERS.splice(0, TEACHERS.length, ...sorted);
+  REGULAR_TEACHERS = TEACHERS.filter((t) => !t.isStudentTeacher);
+  STUDENT_TEACHERS = TEACHERS.filter((t) => Boolean(t.isStudentTeacher));
+  DEPARTMENT_GROUPS = Array.from(
+    new Set([
+      "บริหาร",
+      "ภาษาไทย",
+      "คณิตศาสตร์",
+      "วิทยาศาสตร์",
+      "สังคมศึกษา",
+      "พลศึกษา",
+      "ศิลปะ",
+      "การงานอาชีพ",
+      "ภาษาต่างประเทศ",
+      ...TEACHERS.map((t) => t.g),
+    ])
+  );
+  return sorted;
+}
+
 

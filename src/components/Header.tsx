@@ -1,14 +1,15 @@
 import React from "react";
-import { CalendarCheck, Table2, Users, Moon, Sun } from "lucide-react";
+import { CalendarCheck, Table2, Users, Database, Moon, Sun } from "lucide-react";
 import { SCHOOL_LOGO } from "../data/logo";
 
-export type ActiveTab = "planner" | "timetables" | "free-finder";
+export type ActiveTab = "planner" | "timetables" | "free-finder" | "database";
 
 interface HeaderProps {
   activeTab: ActiveTab;
   onSelectTab: (tab: ActiveTab) => void;
   darkMode: boolean;
   onToggleDarkMode: () => void;
+  teacherCount?: number;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -16,9 +17,10 @@ export const Header: React.FC<HeaderProps> = ({
   onSelectTab,
   darkMode,
   onToggleDarkMode,
+  teacherCount = 31,
 }) => {
   return (
-    <header className="bg-[#12307a] text-white border-b-4 border-[#f2c230] px-3 py-3 sm:px-5 md:px-6 w-full overflow-hidden">
+    <header className="bg-[#12307a] text-white border-b-4 border-[#f2c230] px-3 py-3 sm:px-5 md:px-6 w-full overflow-hidden print:hidden">
       <div className="max-w-[1360px] mx-auto flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3">
         {/* Top Row on Mobile: Brand lockup + Dark mode button */}
         <div className="flex items-center justify-between gap-2 min-w-0">
@@ -35,7 +37,7 @@ export const Header: React.FC<HeaderProps> = ({
                 ระบบจัดสอนแทน โรงเรียนวรคุณอุปถัมภ์
               </h1>
               <p className="text-[11.5px] sm:text-sm text-blue-100/90 leading-snug mt-0.5">
-                ภาคเรียนที่ 2 ปีการศึกษา 2569 · ข้อมูลครบ 31 ท่าน
+                ภาคเรียนที่ 2 ปีการศึกษา 2569 · ข้อมูลในระบบ {teacherCount} ท่าน
               </p>
             </div>
           </div>
@@ -65,12 +67,12 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="flex items-center justify-between gap-3 w-full lg:w-auto">
           <nav
             aria-label="เมนูหลัก"
-            className="grid grid-cols-3 lg:flex items-center gap-1 sm:gap-1.5 bg-[#0a1d4e] p-1 sm:p-1.5 rounded-lg border border-blue-700/60 w-full lg:w-auto"
+            className="grid grid-cols-2 sm:grid-cols-4 lg:flex items-center gap-1.5 bg-[#0a1d4e] p-1.5 rounded-lg border border-blue-700/60 w-full lg:w-auto"
           >
             <button
               type="button"
               onClick={() => onSelectTab("planner")}
-              className={`flex items-center justify-center gap-1 sm:gap-1.5 px-1.5 sm:px-3.5 py-1.5 rounded-md text-xs sm:text-base font-bold transition-colors whitespace-nowrap cursor-pointer ${
+              className={`flex items-center justify-center gap-1.5 px-2.5 sm:px-3.5 py-1.5 rounded-md text-xs sm:text-sm md:text-base font-bold transition-colors whitespace-nowrap cursor-pointer ${
                 activeTab === "planner"
                   ? "bg-[#f2c230] text-[#091536] shadow-xs"
                   : "text-white/90 hover:text-white hover:bg-blue-800/60"
@@ -82,7 +84,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               type="button"
               onClick={() => onSelectTab("timetables")}
-              className={`flex items-center justify-center gap-1 sm:gap-1.5 px-1.5 sm:px-3.5 py-1.5 rounded-md text-xs sm:text-base font-bold transition-colors whitespace-nowrap cursor-pointer ${
+              className={`flex items-center justify-center gap-1.5 px-2.5 sm:px-3.5 py-1.5 rounded-md text-xs sm:text-sm md:text-base font-bold transition-colors whitespace-nowrap cursor-pointer ${
                 activeTab === "timetables"
                   ? "bg-[#f2c230] text-[#091536] shadow-xs"
                   : "text-white/90 hover:text-white hover:bg-blue-800/60"
@@ -94,7 +96,7 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               type="button"
               onClick={() => onSelectTab("free-finder")}
-              className={`flex items-center justify-center gap-1 sm:gap-1.5 px-1.5 sm:px-3.5 py-1.5 rounded-md text-xs sm:text-base font-bold transition-colors whitespace-nowrap cursor-pointer ${
+              className={`flex items-center justify-center gap-1.5 px-2.5 sm:px-3.5 py-1.5 rounded-md text-xs sm:text-sm md:text-base font-bold transition-colors whitespace-nowrap cursor-pointer ${
                 activeTab === "free-finder"
                   ? "bg-[#f2c230] text-[#091536] shadow-xs"
                   : "text-white/90 hover:text-white hover:bg-blue-800/60"
@@ -102,6 +104,18 @@ export const Header: React.FC<HeaderProps> = ({
             >
               <Users className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
               <span>เช็คครูว่าง</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => onSelectTab("database")}
+              className={`flex items-center justify-center gap-1.5 px-2.5 sm:px-3.5 py-1.5 rounded-md text-xs sm:text-sm md:text-base font-bold transition-colors whitespace-nowrap cursor-pointer ${
+                activeTab === "database"
+                  ? "bg-[#f2c230] text-[#091536] shadow-xs"
+                  : "text-white/90 hover:text-white hover:bg-blue-800/60"
+              }`}
+            >
+              <Database className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+              <span>จัดการฐานข้อมูล</span>
             </button>
           </nav>
 

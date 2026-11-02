@@ -2,9 +2,11 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   TEACHERS,
+  INITIAL_TEACHERS,
   DEPARTMENT_GROUPS,
   REGULAR_TEACHERS,
   STUDENT_TEACHERS,
+  setRuntimeTeachers,
 } from "../data/teachers";
 import {
   getDayIndex,
@@ -116,4 +118,31 @@ test("getCandidateTeachers excludes teachers in Tuesday Period 5 department head
   assert.equal(candIds.includes(701), false);
   assert.equal(candIds.includes(802), false);
 });
+
+test("setRuntimeTeachers dynamically adds and removes teachers and updates substitute scheduling", () => {
+  const newTeacher = {
+    id: 104,
+    n: "ครูสมหญิง ใจงาม",
+    g: "ภาษาไทย",
+    pdfGroup: "ภาษาไทย",
+    r: "139",
+    totalHours: 18,
+    coursesSummary: ["ท21102 1/1 [3]"],
+    otherSummary: "PLC [5]",
+    s: ",,,,,,#ชุมนุม|,,,,,,#ฐาน ศก.|,,,,,,#กิจกรรม|#โฮมรูม,,,,,,#การป้องกันทุจริต|,,,,,,#แนะแนว",
+    isStudentTeacher: false,
+  };
+
+  setRuntimeTeachers([...INITIAL_TEACHERS, newTeacher]);
+  assert.equal(TEACHERS.length, 32);
+
+  // Now on Monday Period 2 (when 103 is busy), 104 (ภาษาไทย) is free and should be assigned for 102!
+  const asg = autoAssignSubstitutes(102, "2026-11-02");
+  assert.equal(asg[1], "t104");
+
+  // Restore back to 31 initial teachers
+  setRuntimeTeachers(INITIAL_TEACHERS);
+  assert.equal(TEACHERS.length, 31);
+});
+
 

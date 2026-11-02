@@ -4,6 +4,9 @@ import { SCHOOL_LOGO } from "../data/logo";
 import { DAYS, TeacherRecord } from "../data/teachers";
 import { SubstituteRow, formatThaiDate, getDayIndex } from "./scheduler";
 
+const THAI_FONT_SAMPLE =
+  "โรงเรียนวรคุณอุปถัมภ์ตารางสอนแทนวิทยาศาสตร์คณิตศาสตร์ภาษาต่างประเทศ0123456789";
+
 function escapeXml(str: string): string {
   return String(str).replace(/[&<>'"]/g, (c) => {
     switch (c) {
@@ -23,7 +26,19 @@ function escapeXml(str: string): string {
   });
 }
 
-async function triggerBrowserDownload(filename: string, blob: Blob): Promise<void> {
+function isIOSDevice(): boolean {
+  if (typeof navigator === "undefined") return false;
+  return (
+    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1)
+  );
+}
+
+async function triggerBrowserDownload(
+  filename: string,
+  blob: Blob,
+  mimeType: string
+): Promise<void> {
   const win = window as unknown as {
     claude?: {
       use?: (
@@ -39,7 +54,26 @@ async function triggerBrowserDownload(filename: string, blob: Blob): Promise<voi
         return;
       }
     } catch {
-      // Fall back to standard browser anchor download
+      // Fall back to standard browser download
+    }
+  }
+
+  // บน iOS (โดยเฉพาะเปิดผ่านแอป Messenger / LINE / Safari) รองรับ Web Share API สำหรับบันทึกหรือแชร์ไฟล์โดยตรง
+  if (isIOSDevice() && typeof navigator !== "undefined" && navigator.canShare) {
+    try {
+      const file = new File([blob], filename, { type: mimeType });
+      if (navigator.canShare({ files: [file] })) {
+        await navigator.share({
+          files: [file],
+          title: filename,
+        });
+        return;
+      }
+    } catch (err: unknown) {
+      // หากผู้ใช้กดยกเลิกหน้าต่างแชร์ ไม่ต้องแจ้งเตือนเป็นข้อผิดพลาด
+      if (err instanceof Error && err.name === "AbortError") {
+        return;
+      }
     }
   }
 
@@ -47,10 +81,11 @@ async function triggerBrowserDownload(filename: string, blob: Blob): Promise<voi
   const a = document.createElement("a");
   a.href = url;
   a.download = filename;
+  a.rel = "noopener";
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(url), 3000);
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
 
 function loadImage(src: string): Promise<HTMLImageElement> {
@@ -69,12 +104,12 @@ function wrapCanvasText(
   maxWidth: number,
   allowCharSplit = false
 ): string[] {
-  const str = String(text || "");
+  const str = String(text || "").trim();
   if (!str || ctx.measureText(str).width <= maxWidth) {
     return [str];
   }
   // ตัดตามช่องว่างระหว่างคำ (เช่น ชื่อ นามสกุล หรือวงเล็บ) เพื่อไม่ให้ฉีกคำภาษาไทยกลางคำ
-  const words = str.split(" ");
+  const words = str.split(/\s+/);
   if (words.length > 1) {
     const lines: string[] = [];
     let current = words[0];
@@ -93,7 +128,6 @@ function wrapCanvasText(
   if (!allowCharSplit) {
     return [str];
   }
-  // กรณีบังคับตัดตัวอักษร
   const lines: string[] = [];
   let current = "";
   for (const ch of str) {
@@ -108,22 +142,43 @@ function wrapCanvasText(
   return lines.length ? lines : [str];
 }
 
-async function ensureSarabunFontLoaded(): Promise<void> {
+/**
+ * บังคับโหลดชุดตัวอักษรภาษาไทย (Thai Unicode Subset) ของฟอนต์ Sarabun บน iOS Safari / WebKit
+ * สำคัญมาก: ต้องส่งข้อความภาษาไทยเป็นพารามิเตอร์ที่ 2 ของ document.fonts.load()
+ * มิฉะนั้น iOS Safari จะโหลดเฉพาะชุดตัวอักษรภาษาอังกฤษ (Latin) แล้วใช้ฟอนต์ระบบวาดภาษาไทยจนเพี้ยน
+ */
+export async function ensureSarabunFontLoaded(): Promise<void> {
   if (typeof document === "undefined" || !document.fonts) return;
   try {
     await Promise.all([
-      document.fonts.load("400 14px 'Sarabun'"),
-      document.fonts.load("400 17px 'Sarabun'"),
-      document.fonts.load("700 14.5px 'Sarabun'"),
-      document.fonts.load("700 18.5px 'Sarabun'"),
-      document.fonts.load("700 24px 'Sarabun'"),
+      document.fonts.load("400 14px 'Sarabun'", THAI_FONT_SAMPLE),
+      document.fonts.load("600 14px 'Sarabun'", THAI_FONT_SAMPLE),
+      document.fonts.load("700 14px 'Sarabun'", THAI_FONT_SAMPLE),
+      document.fonts.load("400 17px 'Sarabun'", THAI_SAMPLE_SHORT),
+      document.fonts.load("700 18.5px 'Sarabun'", THAI_SAMPLE_SHORT),
+      document.fonts.load("700 24px 'Sarabun'", THAI_SAMPLE_SHORT),
     ]);
     await document.fonts.ready;
+
+    // รอให้ WebKit ยืนยันว่าฟอนต์ภาษาไทยพร้อมใช้งานจริง (สูงสุด 1.2 วินาที)
+    for (let attempt = 0; attempt < 12; attempt++) {
+      if (document.fonts.check("400 14px 'Sarabun'", "โรงเรียนวรคุณอุปถัมภ์")) {
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 100));
+    }
   } catch {
     // Proceed if font loading API is restricted
   }
 }
 
+const THAI_SAMPLE_SHORT = "โรงเรียนวรคุณอุปถัมภ์ 2569";
+
+/**
+ * วาดข้อความ 1 บรรทัดโดยลดขนาดฟอนต์ลงทีละ 0.5px หากกว้างเกินช่อง
+ * ห้ามส่งพารามิเตอร์ที่ 4 (maxWidth) เข้า ctx.fillText(text, x, y) เด็ดขาด
+ * เพราะ iOS WebKit มีบั๊กบีบสระและวรรณยุกต์ภาษาไทยจนเบี้ยวเมื่อระบุ maxWidth ใน fillText
+ */
 function drawFittedCellLine(
   ctx: CanvasRenderingContext2D,
   text: string,
@@ -136,16 +191,16 @@ function drawFittedCellLine(
 ): void {
   let fontSize = baseFontSize;
   ctx.font = `${fontWeight} ${fontSize}px ${fontStack}`;
-  while (fontSize > 10.5 && ctx.measureText(text).width > maxWidth) {
+  while (fontSize > 9.5 && ctx.measureText(text).width > maxWidth) {
     fontSize -= 0.5;
     ctx.font = `${fontWeight} ${fontSize}px ${fontStack}`;
   }
-  ctx.fillText(text, x, y, maxWidth);
+  ctx.fillText(text, x, y);
 }
 
 /**
  * วาดใบสอนแทนลงบน HTML5 Canvas 2D โดยตรงด้วยความละเอียดสูง (2x A4 = 1588x2246 px)
- * บังคับใช้ฟอนต์เว็บ Sarabun เดียวกันทุกเครื่อง และปรับขนาดอัตโนมัติไม่ให้ล้นหรือตกบรรทัดในทุกอุปกรณ์
+ * ออกแบบมาให้เรนเดอร์เหมือนกัน 100% ทั้งบน iOS (Safari / Messenger WebView), Android และ PC
  */
 export async function renderPaperToCanvas(
   absentTeacher: TeacherRecord,
@@ -178,14 +233,17 @@ export async function renderPaperToCanvas(
   const contentWidth = pageWidth - marginX * 2; // 706px
   const fontStack = "'Sarabun', sans-serif";
 
+  // ใช้ textBaseline = "alphabetic" เสมอ เพื่อป้องกันบั๊ก textBaseline="middle" ของ iOS WebKit ที่ทำให้สระไทยลอยหรือจม
+  ctx.textBaseline = "alphabetic";
+
   // 1. วาดตราโรงเรียนตรงกลางด้านบน
-  let cursorY = 42;
+  let cursorY = 40;
   try {
     const logoImg = await loadImage(SCHOOL_LOGO);
-    const logoH = 88;
+    const logoH = 86;
     const logoW = (logoImg.naturalWidth / logoImg.naturalHeight) * logoH;
     ctx.drawImage(logoImg, (pageWidth - logoW) / 2, cursorY, logoW, logoH);
-    cursorY += logoH + 24;
+    cursorY += logoH + 26;
   } catch {
     cursorY += 90;
   }
@@ -193,7 +251,6 @@ export async function renderPaperToCanvas(
   // 2. หัวกระดาษ
   ctx.fillStyle = "#000000";
   ctx.textAlign = "center";
-  ctx.textBaseline = "alphabetic";
 
   drawFittedCellLine(
     ctx,
@@ -201,7 +258,7 @@ export async function renderPaperToCanvas(
     pageWidth / 2,
     cursorY,
     contentWidth,
-    24,
+    23,
     "700",
     fontStack
   );
@@ -213,11 +270,11 @@ export async function renderPaperToCanvas(
     pageWidth / 2,
     cursorY,
     contentWidth,
-    18.5,
+    18,
     "700",
     fontStack
   );
-  cursorY += 36;
+  cursorY += 34;
 
   // 3. ข้อมูลครูที่ลาและเหตุผล
   const d = getDayIndex(dateStr);
@@ -232,7 +289,7 @@ export async function renderPaperToCanvas(
     marginX,
     cursorY,
     contentWidth,
-    17,
+    16.5,
     "400",
     fontStack
   );
@@ -244,14 +301,15 @@ export async function renderPaperToCanvas(
     marginX,
     cursorY,
     contentWidth,
-    17,
+    16.5,
     "400",
     fontStack
   );
   cursorY += 18;
 
-  // 4. วาดตาราง 8 คอลัมน์ (ผลรวมความกว้าง = 706px พอดี เว้นระยะขอบซ้ายขวาในช่องอย่างสมดุล)
-  const colWidths = [54, 98, 72, 44, 72, 184, 102, 80];
+  // 4. วาดตาราง 8 คอลัมน์ (ผลรวมความกว้าง = 706px พอดี)
+  // [คาบที่ 48, เวลา 100, รหัสวิชา 74, ชั้น 44, ห้องเรียน 68, ผู้สอนแทน 188, กลุ่มสาระ 106, ลายมือชื่อ 78]
+  const colWidths = [48, 100, 74, 44, 68, 188, 106, 78];
   const headers = [
     "คาบที่",
     "เวลา",
@@ -264,18 +322,17 @@ export async function renderPaperToCanvas(
   ];
 
   const headerHeight = 38;
-  ctx.lineWidth = 1.2;
+  ctx.lineWidth = 1.15;
   ctx.strokeStyle = "#000000";
 
   // พื้นหลังหัวตาราง
   ctx.fillStyle = "#e8edf7";
   ctx.fillRect(marginX, cursorY, contentWidth, headerHeight);
 
-  // เส้นตารางและข้อความหัวตาราง
+  // เส้นตารางและข้อความหัวตาราง (คำนวณจุดกึ่งกลางแนวตั้งด้วย alphabetic baseline + 5px)
   let colX = marginX;
   ctx.fillStyle = "#000000";
   ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
 
   for (let i = 0; i < headers.length; i++) {
     const w = colWidths[i];
@@ -284,9 +341,9 @@ export async function renderPaperToCanvas(
       ctx,
       headers[i],
       colX + w / 2,
-      cursorY + headerHeight / 2 + 1,
-      w - 10,
-      14.5,
+      cursorY + headerHeight / 2 + 5,
+      w - 8,
+      14,
       "700",
       fontStack
     );
@@ -294,7 +351,7 @@ export async function renderPaperToCanvas(
   }
   cursorY += headerHeight;
 
-  // วาดแถวข้อมูลแต่ละคาบ (ใช้ขนาด 14px พร้อมระบบปรับขนาดอัตโนมัติหากข้อความยาว)
+  // วาดแถวข้อมูลแต่ละคาบ
   for (const row of rows) {
     const cellValues = [
       String(row.p),
@@ -307,51 +364,51 @@ export async function renderPaperToCanvas(
       "",
     ];
 
-    ctx.font = `400 14px ${fontStack}`;
-    // คำนวณการตัดบรรทัดของแต่ละช่อง (เฉพาะคอลัมน์ผู้สอนแทนที่ตัดตามเว้นวรรคได้ ส่วนกลุ่มสาระห้ามฉีกคำ)
+    const cellFontSize = 13.5;
+    ctx.font = `400 ${cellFontSize}px ${fontStack}`;
+
+    // เฉพาะคอลัมน์ผู้สอนแทน (index 5) ที่อนุญาตให้ตัดบรรทัดตามเว้นวรรคหากชื่อยาวมาก
     const wrappedCells = cellValues.map((val, idx) =>
       idx === 5 ? wrapCanvasText(ctx, val, colWidths[idx] - 16, false) : [val]
     );
     const maxLines = Math.max(...wrappedCells.map((lines) => lines.length), 1);
-    const rowHeight = Math.max(36, maxLines * 20 + 14);
+    const lineHeight = 20;
+    const rowHeight = Math.max(38, maxLines * lineHeight + 16);
 
     let x = marginX;
     for (let i = 0; i < cellValues.length; i++) {
       const w = colWidths[i];
-      // วาดกรอบช่องตารางครบทั้ง 4 ด้าน
       ctx.strokeRect(x, cursorY, w, rowHeight);
 
       const lines = wrappedCells[i];
-      const lineHeight = 20;
-      const totalTextHeight = lines.length * lineHeight;
-      const startY = cursorY + (rowHeight - totalTextHeight) / 2 + lineHeight / 2 + 1;
+      const blockHeight = (lines.length - 1) * lineHeight;
+      // จุดกึ่งกลางแนวตั้งสำหรับ alphabetic baseline
+      const firstLineBaselineY = cursorY + rowHeight / 2 - blockHeight / 2 + 4.8;
 
       if (i === 5) {
-        // คอลัมน์ผู้สอนแทน จัดชิดซ้ายพร้อมระยะห่างจากเส้นตาราง
         ctx.textAlign = "left";
         lines.forEach((line, lIdx) => {
           drawFittedCellLine(
             ctx,
             line,
-            x + 9,
-            startY + lIdx * lineHeight,
+            x + 8,
+            firstLineBaselineY + lIdx * lineHeight,
             w - 16,
-            14,
+            cellFontSize,
             "400",
             fontStack
           );
         });
       } else {
-        // คอลัมน์อื่น จัดกึ่งกลางพร้อมระยะห่างซ้ายขวาอย่างน้อยข้างละ 6px
         ctx.textAlign = "center";
         lines.forEach((line, lIdx) => {
           drawFittedCellLine(
             ctx,
             line,
             x + w / 2,
-            startY + lIdx * lineHeight,
-            w - 12,
-            14,
+            firstLineBaselineY + lIdx * lineHeight,
+            w - 10,
+            cellFontSize,
             "400",
             fontStack
           );
@@ -364,32 +421,56 @@ export async function renderPaperToCanvas(
     cursorY += rowHeight;
   }
 
-  // 5. ส่วนลงนามด้านล่าง (จัดแบบฟอร์มราชการมาตรฐาน 3 บรรทัด: ลงชื่อ / วงเล็บชื่อ / ตำแหน่ง)
+  // 5. ส่วนลงนามด้านล่าง (แบ่ง 3 คอลัมน์เท่าๆ กัน ไม่เบียดกันบน iOS)
   cursorY += 54;
   ctx.textAlign = "center";
   ctx.textBaseline = "alphabetic";
-  ctx.font = `400 15px ${fontStack}`;
 
-  const sigPositions = [
-    marginX + 108,
-    marginX + contentWidth / 2,
-    marginX + contentWidth - 108,
-  ];
-  const sigTitles = [
-    "ผู้สอนแทน",
-    "ผู้ช่วยฯฝ่ายวิชาการ",
-    "ผู้อำนวยการ",
-  ];
+  const sigColWidth = contentWidth / 3; // 235.33px ต่อคอลัมน์
+  const sigTitles = ["ผู้สอนแทน", "ผู้ช่วยฯฝ่ายวิชาการ", "ผู้อำนวยการ"];
 
-  sigPositions.forEach((posX, idx) => {
-    ctx.fillText("ลงชื่อ................................................", posX, cursorY);
-    ctx.fillText("(................................................)", posX + 12, cursorY + 26);
-    ctx.fillText(sigTitles[idx], posX + 6, cursorY + 52);
+  sigTitles.forEach((title, idx) => {
+    const centerX = marginX + sigColWidth * (idx + 0.5);
+    drawFittedCellLine(
+      ctx,
+      "ลงชื่อ........................................",
+      centerX,
+      cursorY,
+      sigColWidth - 16,
+      14.5,
+      "400",
+      fontStack
+    );
+    drawFittedCellLine(
+      ctx,
+      "(........................................)",
+      centerX + 8,
+      cursorY + 25,
+      sigColWidth - 16,
+      14.5,
+      "400",
+      fontStack
+    );
+    drawFittedCellLine(
+      ctx,
+      title,
+      centerX + 4,
+      cursorY + 50,
+      sigColWidth - 16,
+      14.5,
+      "400",
+      fontStack
+    );
   });
 
   return canvas;
 }
 
+/**
+ * สร้างไฟล์ Word (.docx) ที่รองรับทั้งการเปิดบน iOS (Pages / QuickLook / Word Mobile) และ PC
+ * - กำหนดขนาดฟอนต์มาตรฐานสากล (11pt / 10.5pt สำหรับตาราง) และตั้งค่า <w:noWrap/> ในคอลัมน์สั้น
+ *   เพื่อไม่ให้ตัวอักษรล้นหรือตารางพังเมื่อเปิดบน iPhone/iPad ที่ไม่มีฟอนต์ TH Sarabun PSK
+ */
 export async function generateDocxBlob(
   absentTeacher: TeacherRecord,
   dateStr: string,
@@ -399,7 +480,7 @@ export async function generateDocxBlob(
   const d = getDayIndex(dateStr);
   const dayLabel = d >= 0 ? DAYS[d] : "-";
   const FN =
-    '<w:rFonts w:ascii="TH Sarabun PSK" w:hAnsi="TH Sarabun PSK" w:cs="TH Sarabun PSK"/>';
+    '<w:rFonts w:ascii="Sarabun" w:hAnsi="Sarabun" w:cs="TH Sarabun New" w:eastAsia="Sarabun"/>';
 
   const P = (
     t: string,
@@ -408,12 +489,13 @@ export async function generateDocxBlob(
     `<w:p><w:pPr><w:spacing w:before="0" w:after="${o.a ?? 40}"/><w:jc w:val="${
       o.c ? "center" : o.j || "left"
     }"/></w:pPr><w:r><w:rPr>${FN}${o.b ? "<w:b/><w:bCs/>" : ""}<w:sz w:val="${
-      o.z || 32
-    }"/><w:szCs w:val="${o.z || 32}"/></w:rPr><w:t xml:space="preserve">${escapeXml(
+      o.z || 24
+    }"/><w:szCs w:val="${o.z || 24}"/></w:rPr><w:t xml:space="preserve">${escapeXml(
       t
     )}</w:t></w:r></w:p>`;
 
-  const W = [760, 1420, 1020, 620, 1020, 2600, 1540, 1220];
+  // ความกว้างรวม 10200 dxa (พอดีกระดาษ A4 แนวตั้ง)
+  const W = [700, 1480, 1080, 640, 980, 2680, 1520, 1120];
   const H = [
     "คาบที่",
     "เวลา",
@@ -425,21 +507,24 @@ export async function generateDocxBlob(
     "ลายมือชื่อ",
   ];
 
-  const C = (t: string, i: number, b?: boolean | number) =>
-    `<w:tc><w:tcPr><w:tcW w:w="${W[i]}" w:type="dxa"/>${
+  const C = (t: string, i: number, b?: boolean | number) => {
+    // ห้ามตัดคำตกบรรทัดสำหรับคอลัมน์สั้น (คาบที่, เวลา, รหัสวิชา, ชั้น, ห้องเรียน, กลุ่มสาระ)
+    const noWrap = i !== 5 ? "<w:noWrap/>" : "";
+    return `<w:tc><w:tcPr><w:tcW w:w="${W[i]}" w:type="dxa"/>${noWrap}${
       b ? '<w:shd w:val="clear" w:color="auto" w:fill="E8EDF7"/>' : ""
     }<w:vAlign w:val="center"/></w:tcPr>${P(t, {
       c: i !== 5,
       b,
       a: 0,
-      z: 28,
+      z: b ? 21 : 20, // 10.5pt สำหรับหัวตาราง, 10pt สำหรับข้อมูลตาราง (ไม่ล้นบน iOS QuickLook / Word Mobile)
     })}</w:tc>`;
+  };
 
-  const bd = ["top", "left","bottom", "right", "insideH", "insideV"]
+  const bd = ["top", "left", "bottom", "right", "insideH", "insideV"]
     .map((s) => `<w:${s} w:val="single" w:sz="4" w:space="0" w:color="000000"/>`)
     .join("");
 
-  const tb = `<w:tbl><w:tblPr><w:tblW w:w="10200" w:type="dxa"/><w:tblBorders>${bd}</w:tblBorders><w:tblLayout w:type="fixed"/><w:tblCellMar><w:top w:w="40" w:type="dxa"/><w:bottom w:w="40" w:type="dxa"/></w:tblCellMar></w:tblPr><w:tr>${H.map(
+  const tb = `<w:tbl><w:tblPr><w:tblW w:w="10200" w:type="dxa"/><w:tblBorders>${bd}</w:tblBorders><w:tblLayout w:type="fixed"/><w:tblCellMar><w:top w:w="60" w:type="dxa"/><w:bottom w:w="60" w:type="dxa"/><w:left w:w="60" w:type="dxa"/><w:right w:w="60" w:type="dxa"/></w:tblCellMar></w:tblPr><w:tr>${H.map(
     (h, i) => C(h, i, 1)
   ).join("")}</w:tr>${rows
     .map(
@@ -452,13 +537,13 @@ export async function generateDocxBlob(
 
   const sigCell = (role: string) =>
     `<w:tc><w:tcPr><w:tcW w:w="3400" w:type="dxa"/></w:tcPr>${P(
-      "ลงชื่อ................................................",
-      { c: 1, a: 20, z: 30 }
-    )}${P("   (................................................)", {
+      "ลงชื่อ........................................",
+      { c: 1, a: 20, z: 22 }
+    )}${P("(........................................)", {
       c: 1,
       a: 20,
-      z: 30,
-    })}${P(role, { c: 1, a: 0, z: 30 })}</w:tc>`;
+      z: 22,
+    })}${P(role, { c: 1, a: 0, z: 22 })}</w:tc>`;
 
   const sigTable = `<w:tbl><w:tblPr><w:tblW w:w="10200" w:type="dxa"/><w:tblLayout w:type="fixed"/></w:tblPr><w:tr>${sigCell(
     "ผู้สอนแทน"
@@ -470,22 +555,23 @@ export async function generateDocxBlob(
 
   const body =
     lg +
-    P("โรงเรียนวรคุณอุปถัมภ์", { c: 1, b: 1, z: 40 }) +
+    P("โรงเรียนวรคุณอุปถัมภ์", { c: 1, b: 1, z: 32 }) +
     P(
       `ตารางสอนแทน ภาคเรียนที่ 2 ปีการศึกษา 2569 กลุ่ม/ฝ่าย/งาน ${absentTeacher.pdfGroup}`,
-      { c: 1, b: 1, z: 34, a: 160 }
+      { c: 1, b: 1, z: 26, a: 140 }
     ) +
     P(
       `ครูผู้สอน ${absentTeacher.id} ${absentTeacher.n}    วัน${dayLabel}ที่ ${formatThaiDate(
         dateStr
-      )}`
+      )}`,
+      { z: 23 }
     ) +
     P(
       `ไม่สามารถปฏิบัติการสอนได้เนื่องจาก ${reason || "-"} จึงมอบหมายให้สอนแทนดังนี้`,
-      { a: 120 }
+      { a: 120, z: 23 }
     ) +
     tb +
-    P("", { a: 320 }) +
+    P("", { a: 280 }) +
     sigTable;
 
   const z = new JSZip();
@@ -534,11 +620,15 @@ export async function exportSubstituteDocument(
 
   if (format === "word") {
     const blob = await generateDocxBlob(absentTeacher, dateStr, reason, rows);
-    await triggerBrowserDownload(`${baseFilename}.docx`, blob);
+    await triggerBrowserDownload(
+      `${baseFilename}.docx`,
+      blob,
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    );
     return;
   }
 
-  // วาดลง Canvas 2D โดยตรงเพื่อให้ตารางและตัวอักษรคมชัดสมบูรณ์ ไม่เพี้ยน
+  // วาดลง Canvas 2D โดยตรงเพื่อให้ตารางและตัวอักษรคมชัดสมบูรณ์ ไม่เพี้ยนทุกเครื่อง
   const canvas = await renderPaperToCanvas(absentTeacher, dateStr, reason, rows);
 
   if (format === "image") {
@@ -546,7 +636,7 @@ export async function exportSubstituteDocument(
       canvas.toBlob(resolve, "image/png")
     );
     if (!blob) throw new Error("ไม่สามารถสร้างไฟล์รูปภาพได้");
-    await triggerBrowserDownload(`${baseFilename}.png`, blob);
+    await triggerBrowserDownload(`${baseFilename}.png`, blob, "image/png");
     return;
   }
 
@@ -556,5 +646,5 @@ export async function exportSubstituteDocument(
   const pdfHeight = (pdfWidth * canvas.height) / canvas.width;
   pdf.addImage(imgData, "PNG", 0, 0, pdfWidth, pdfHeight);
   const pdfBlob = pdf.output("blob");
-  await triggerBrowserDownload(`${baseFilename}.pdf`, pdfBlob);
+  await triggerBrowserDownload(`${baseFilename}.pdf`, pdfBlob, "application/pdf");
 }

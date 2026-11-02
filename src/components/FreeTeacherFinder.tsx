@@ -4,22 +4,26 @@ import {
   DAYS,
   DEPARTMENT_GROUPS,
   PERIOD_TIMES,
-  TEACHERS,
+  TeacherRecord,
 } from "../data/teachers";
 import { formatRoomLabel, parseScheduleCell } from "../utils/scheduler";
 
 interface FreeTeacherFinderProps {
+  teachers: TeacherRecord[];
   onSelectTeacherForSubstitute: (teacherId: number) => void;
 }
 
 export const FreeTeacherFinder: React.FC<FreeTeacherFinderProps> = ({
+  teachers,
   onSelectTeacherForSubstitute,
 }) => {
   const [dayIdx, setDayIdx] = useState<number>(0); // 0 = จันทร์
   const [periodIdx, setPeriodIdx] = useState<number>(0); // 0 = คาบ 1
   const [filterGroup, setFilterGroup] = useState<string>("ทั้งหมด");
 
-  const teachersInScope = TEACHERS.filter((t) => {
+  const studentCount = teachers.filter((t) => Boolean(t.isStudentTeacher)).length;
+
+  const teachersInScope = teachers.filter((t) => {
     if (filterGroup === "ทั้งหมด") return true;
     if (filterGroup === "นักศึกษาฝึกสอน") return Boolean(t.isStudentTeacher);
     return t.g === filterGroup;
@@ -39,7 +43,7 @@ export const FreeTeacherFinder: React.FC<FreeTeacherFinderProps> = ({
 
   return (
     <div className="space-y-5">
-      <section className="bg-white dark:bg-[#14204a] border border-[#c9d4ec] dark:border-[#2a3a6e] rounded-xl p-5 shadow-xs">
+      <section className="bg-white dark:bg-[#14204a] border border-[#c9d4ec] dark:border-[#2a3a6e] rounded-xl p-4 sm:p-5 shadow-xs">
         <h2 className="text-xl font-bold text-[#0f2150] dark:text-[#e9eefc]">
           เช็คครูว่างรายคาบ (ตรวจสอบผู้พร้อมสอนแทนในแต่ละวันและคาบ)
         </h2>
@@ -120,7 +124,7 @@ export const FreeTeacherFinder: React.FC<FreeTeacherFinderProps> = ({
                 : "bg-[#eaf0fa] dark:bg-[#0b1330] text-[#0f2150] dark:text-[#9fb0dc]"
             }`}
           >
-            นักศึกษาฝึกสอน (4)
+            นักศึกษาฝึกสอน ({studentCount})
           </button>
           {DEPARTMENT_GROUPS.map((g) => (
             <button
@@ -142,7 +146,7 @@ export const FreeTeacherFinder: React.FC<FreeTeacherFinderProps> = ({
       {/* ผลลัพธ์ครูว่าง vs ครูติดสอน */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         {/* คอลัมน์ครูว่าง */}
-        <section className="bg-white dark:bg-[#14204a] border border-[#c9d4ec] dark:border-[#2a3a6e] rounded-xl p-5 shadow-xs">
+        <section className="bg-white dark:bg-[#14204a] border border-[#c9d4ec] dark:border-[#2a3a6e] rounded-xl p-4 sm:p-5 shadow-xs">
           <div className="flex items-center justify-between pb-3 mb-3 border-b border-[#c9d4ec] dark:border-[#2a3a6e]">
             <h3 className="text-lg font-bold text-[#0b7a4b] dark:text-[#4fd39a] flex items-center gap-2">
               <CheckCircle2 className="w-5 h-5" />
@@ -172,7 +176,7 @@ export const FreeTeacherFinder: React.FC<FreeTeacherFinderProps> = ({
                       · {t.pdfGroup} ({formatRoomLabel(t.r)})
                     </span>
                   </div>
-                  <span className="text-xs font-semibold text-[#0b7a4b] dark:text-[#4fd39a]">
+                  <span className="text-xs font-semibold text-[#0b7a4b] dark:text-[#4fd39a] whitespace-nowrap">
                     ว่างพร้อมสอนแทน
                   </span>
                 </div>
@@ -182,7 +186,7 @@ export const FreeTeacherFinder: React.FC<FreeTeacherFinderProps> = ({
         </section>
 
         {/* คอลัมน์ครูมีคาบสอน/ติดภารกิจ */}
-        <section className="bg-white dark:bg-[#14204a] border border-[#c9d4ec] dark:border-[#2a3a6e] rounded-xl p-5 shadow-xs">
+        <section className="bg-white dark:bg-[#14204a] border border-[#c9d4ec] dark:border-[#2a3a6e] rounded-xl p-4 sm:p-5 shadow-xs">
           <div className="flex items-center justify-between pb-3 mb-3 border-b border-[#c9d4ec] dark:border-[#2a3a6e]">
             <h3 className="text-lg font-bold text-[#0f2150] dark:text-[#e9eefc] flex items-center gap-2">
               <Clock className="w-5 h-5 text-[#1b4fb8] dark:text-[#6c97ff]" />
