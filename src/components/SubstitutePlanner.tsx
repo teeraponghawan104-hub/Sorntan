@@ -1,4 +1,4 @@
-import React, { useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   FileDown,
   FileText,
@@ -24,7 +24,7 @@ import {
   getTeacherById,
   getTeacherClasses,
 } from "../utils/scheduler";
-import { exportSubstituteDocument } from "../utils/exportDoc";
+import { exportSubstituteDocument, renderPaperToCanvas } from "../utils/exportDoc";
 
 interface SubstitutePlannerProps {
   selectedTeacherId: string;
@@ -67,6 +67,7 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
     type: "",
   });
   const [isExporting, setIsExporting] = useState(false);
+  const [previewDataUrl, setPreviewDataUrl] = useState<string>("");
 
   const absentTeacher = getTeacherById(selectedTeacherId);
   const dayIdx = getDayIndex(selectedDate);
@@ -82,6 +83,29 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
   const canExport = Boolean(
     absentTeacher && dayIdx >= 0 && docRows.length > 0 && docRows.every((r) => r.n !== "-")
   );
+
+  // วาดภาพตัวอย่าง A4 ความละเอียดสูงจาก Canvas 2D โดยตรง เพื่อให้แสดงผลเหมือนกัน 100% บนทุกอุปกรณ์และทุกขนาดหน้าจอ
+  useEffect(() => {
+    let cancelled = false;
+    if (!absentTeacher || dayIdx < 0 || docRows.length === 0) {
+      setPreviewDataUrl("");
+      return;
+    }
+    renderPaperToCanvas(absentTeacher, selectedDate, reason, docRows)
+      .then((canvas) => {
+        if (!cancelled) {
+          setPreviewDataUrl(canvas.toDataURL("image/png"));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setPreviewDataUrl("");
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [absentTeacher, dayIdx, selectedDate, reason, JSON.stringify(docRows)]);
 
   // ปุ่มสลับวันจันทร์-ศุกร์ในสัปดาห์ของวันที่เลือก
   const jumpToWeekday = (targetDayIdx: number) => {
@@ -491,142 +515,81 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
           </div>
         )}
 
-        {/* กระดาษ A4 ตัวอย่างใบสอนแทน */}
-        <div className="overflow-x-auto bg-slate-100 dark:bg-[#0b1330] p-3 md:p-5 rounded-lg border border-[#c9d4ec] dark:border-[#2a3a6e] print:p-0 print:bg-white print:border-0">
+        {/* กระดาษ A4 ตัวอย่างใบสอนแทน (ปรับย่อ-ขยายอัตโนมัติทุกขนาดหน้าจอ ไม่เพี้ยนทุกเครื่อง) */}
+        <div className="bg-slate-100 dark:bg-[#0b1330] p-2 sm:p-4 md:p-5 rounded-lg border border-[#c9d4ec] dark:border-[#2a3a6e] print:p-0 print:bg-white print:border-0">
           <div
             id="paper"
             ref={paperRef}
-            className="paper-sheet w-[794px] min-h-[1123px] bg-white text-black px-[44px] py-[48px] mx-auto shadow-md print:shadow-none text-[18px] leading-[1.35]"
+            className="paper-sheet w-full max-w-[794px] bg-white text-black mx-auto shadow-md print:shadow-none relative overflow-hidden"
           >
             {!absentTeacher || dayIdx < 0 || docRows.length === 0 ? (
-              <div className="text-center mt-[200px] text-neutral-500">
+              <div className="text-center py-36 px-6 text-neutral-500 min-h-[640px] flex flex-col items-center justify-center">
                 <img
                   src={SCHOOL_LOGO}
                   alt="ตราโรงเรียน"
                   referrerPolicy="no-referrer"
                   className="h-[84px] mx-auto mb-4 opacity-50"
                 />
-                <p className="text-[22px] font-semibold">
+                <p className="text-xl font-semibold">
                   เลือกครูและวันที่ที่มีคาบสอน เพื่อแสดงตัวอย่างใบสอนแทน
                 </p>
-                <p className="text-[17px] mt-1">
+                <p className="text-base mt-1">
                   โรงเรียนวรคุณอุปถัมภ์ · ภาคเรียนที่ 2 ปีการศึกษา 2569
                 </p>
               </div>
             ) : (
               <>
-                <div className="text-center">
+                {previewDataUrl && (
                   <img
-                    src={SCHOOL_LOGO}
-                    alt="ตราโรงเรียนวรคุณอุปถัมภ์"
-                    referrerPolicy="no-referrer"
-                    className="h-[92px] mx-auto mb-1"
+                    src={previewDataUrl}
+                    alt="ตัวอย่างเอกสารใบสอนแทน A4 โรงเรียนวรคุณอุปถัมภ์"
+                    className="w-full h-auto block select-none"
                   />
-                  <h3 className="my-0.5 text-[25px] font-bold">
-                    โรงเรียนวรคุณอุปถัมภ์
-                  </h3>
-                  <h4 className="m-0 text-[20px] font-bold">
-                    ตารางสอนแทน ภาคเรียนที่ 2 ปีการศึกษา 2569 กลุ่ม/ฝ่าย/งาน{" "}
-                    {absentTeacher.pdfGroup}
-                  </h4>
-                </div>
-
-                <p className="mt-4 mb-0 text-[17px]">
-                  ครูผู้สอน {absentTeacher.id} {absentTeacher.n} &nbsp;&nbsp; วัน{DAYS[dayIdx]}ที่{" "}
-                  {formatThaiDate(selectedDate)}
-                </p>
-                <p className="m-0 text-[17px]">
-                  ไม่สามารถปฏิบัติการสอนได้เนื่องจาก {reason || "-"} จึงมอบหมายให้สอนแทนดังนี้
-                </p>
-
-                <table
-                  style={{ borderCollapse: "collapse", tableLayout: "fixed" }}
-                  className="w-full mt-4 text-[14px] border border-black"
-                >
-                  <colgroup>
-                    <col style={{ width: "54px" }} />
-                    <col style={{ width: "98px" }} />
-                    <col style={{ width: "72px" }} />
-                    <col style={{ width: "44px" }} />
-                    <col style={{ width: "72px" }} />
-                    <col style={{ width: "184px" }} />
-                    <col style={{ width: "102px" }} />
-                    <col style={{ width: "80px" }} />
-                  </colgroup>
-                  <thead>
-                    <tr className="bg-[#e8edf7] text-[14.5px]">
-                      <th className="border border-black px-1.5 py-2 text-center font-bold whitespace-nowrap">
-                        คาบที่
-                      </th>
-                      <th className="border border-black px-1.5 py-2 text-center font-bold whitespace-nowrap">
-                        เวลา
-                      </th>
-                      <th className="border border-black px-1.5 py-2 text-center font-bold whitespace-nowrap">
-                        รหัสวิชา
-                      </th>
-                      <th className="border border-black px-1 py-2 text-center font-bold whitespace-nowrap">
-                        ชั้น
-                      </th>
-                      <th className="border border-black px-1.5 py-2 text-center font-bold whitespace-nowrap">
-                        ห้องเรียน
-                      </th>
-                      <th className="border border-black px-2 py-2 text-center font-bold whitespace-nowrap">
-                        ผู้สอนแทน
-                      </th>
-                      <th className="border border-black px-1.5 py-2 text-center font-bold whitespace-nowrap">
-                        กลุ่มสาระ
-                      </th>
-                      <th className="border border-black px-1.5 py-2 text-center font-bold whitespace-nowrap">
-                        ลายมือชื่อ
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {docRows.map((row) => (
-                      <tr key={row.p} className="align-middle">
-                        <td className="border border-black px-1.5 py-2 text-center whitespace-nowrap">
-                          {row.p}
-                        </td>
-                        <td className="border border-black px-1.5 py-2 text-center whitespace-nowrap">
-                          {row.tm}
-                        </td>
-                        <td className="border border-black px-1.5 py-2 text-center whitespace-nowrap">
-                          {row.code}
-                        </td>
-                        <td className="border border-black px-1 py-2 text-center whitespace-nowrap">
-                          {row.cls}
-                        </td>
-                        <td className="border border-black px-1.5 py-2 text-center whitespace-nowrap">
-                          {row.room}
-                        </td>
-                        <td className="border border-black px-2.5 py-2 text-left leading-snug">
-                          {row.n}
-                        </td>
-                        <td className="border border-black px-1.5 py-2 text-center leading-snug whitespace-nowrap">
-                          {row.g}
-                        </td>
-                        <td className="border border-black px-1.5 py-2 text-center"></td>
+                )}
+                {/* โครงสร้างตาราง Semantic สำหรับ Screen Reader และการค้นหาข้อความ */}
+                <div className={previewDataUrl ? "sr-only" : "px-[44px] py-[48px] text-[18px] leading-[1.35]"}>
+                  <div className="text-center">
+                    <h3>โรงเรียนวรคุณอุปถัมภ์</h3>
+                    <h4>
+                      ตารางสอนแทน ภาคเรียนที่ 2 ปีการศึกษา 2569 กลุ่ม/ฝ่าย/งาน{" "}
+                      {absentTeacher.pdfGroup}
+                    </h4>
+                  </div>
+                  <p>
+                    ครูผู้สอน {absentTeacher.id} {absentTeacher.n} วัน{DAYS[dayIdx]}ที่{" "}
+                    {formatThaiDate(selectedDate)}
+                  </p>
+                  <p>
+                    ไม่สามารถปฏิบัติการสอนได้เนื่องจาก {reason || "-"} จึงมอบหมายให้สอนแทนดังนี้
+                  </p>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>คาบที่</th>
+                        <th>เวลา</th>
+                        <th>รหัสวิชา</th>
+                        <th>ชั้น</th>
+                        <th>ห้องเรียน</th>
+                        <th>ผู้สอนแทน</th>
+                        <th>กลุ่มสาระ</th>
+                        <th>ลายมือชื่อ</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-
-                <div className="grid grid-cols-3 gap-4 mt-14 text-[15.5px] text-center">
-                  <div className="whitespace-nowrap">
-                    <div>ลงชื่อ................................................</div>
-                    <div className="mt-1 pl-6">(................................................)</div>
-                    <div className="mt-1 pl-3 font-medium">ผู้สอนแทน</div>
-                  </div>
-                  <div className="whitespace-nowrap">
-                    <div>ลงชื่อ................................................</div>
-                    <div className="mt-1 pl-6">(................................................)</div>
-                    <div className="mt-1 pl-3 font-medium">ผู้ช่วยฯฝ่ายวิชาการ</div>
-                  </div>
-                  <div className="whitespace-nowrap">
-                    <div>ลงชื่อ................................................</div>
-                    <div className="mt-1 pl-6">(................................................)</div>
-                    <div className="mt-1 pl-3 font-medium">ผู้อำนวยการ</div>
-                  </div>
+                    </thead>
+                    <tbody>
+                      {docRows.map((row) => (
+                        <tr key={row.p}>
+                          <td>{row.p}</td>
+                          <td>{row.tm}</td>
+                          <td>{row.code}</td>
+                          <td>{row.cls}</td>
+                          <td>{row.room}</td>
+                          <td>{row.n}</td>
+                          <td>{row.g}</td>
+                          <td></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
               </>
             )}

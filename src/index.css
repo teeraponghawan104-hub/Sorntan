@@ -2,12 +2,29 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 @layer base {
+  html,
   body {
-    font-family: 'TH Sarabun PSK', 'Sarabun', sans-serif;
+    font-family: "Sarabun", sans-serif;
     font-variant-numeric: tabular-nums;
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    -webkit-font-smoothing: antialiased;
   }
 }
 
 .paper-sheet {
-  font-family: 'TH Sarabun PSK', 'Sarabun', sans-serif;
+  font-family: "Sarabun", sans-serif;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
 }
+
+@media print {
+  @page {
+    size: A4 portrait;
+    margin: 0;
+  }
+  body {
+    background: #ffffff !important;
+  }
+}
+

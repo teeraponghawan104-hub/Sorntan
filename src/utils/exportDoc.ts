@@ -108,9 +108,44 @@ function wrapCanvasText(
   return lines.length ? lines : [str];
 }
 
+async function ensureSarabunFontLoaded(): Promise<void> {
+  if (typeof document === "undefined" || !document.fonts) return;
+  try {
+    await Promise.all([
+      document.fonts.load("400 14px 'Sarabun'"),
+      document.fonts.load("400 17px 'Sarabun'"),
+      document.fonts.load("700 14.5px 'Sarabun'"),
+      document.fonts.load("700 18.5px 'Sarabun'"),
+      document.fonts.load("700 24px 'Sarabun'"),
+    ]);
+    await document.fonts.ready;
+  } catch {
+    // Proceed if font loading API is restricted
+  }
+}
+
+function drawFittedCellLine(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  x: number,
+  y: number,
+  maxWidth: number,
+  baseFontSize: number,
+  fontWeight: "400" | "700",
+  fontStack: string
+): void {
+  let fontSize = baseFontSize;
+  ctx.font = `${fontWeight} ${fontSize}px ${fontStack}`;
+  while (fontSize > 10.5 && ctx.measureText(text).width > maxWidth) {
+    fontSize -= 0.5;
+    ctx.font = `${fontWeight} ${fontSize}px ${fontStack}`;
+  }
+  ctx.fillText(text, x, y, maxWidth);
+}
+
 /**
- * วาดใบสอนแทนลงบน HTML5 Canvas 2D โดยตรงด้วยความละเอียดสูง (2x A4)
- * เพื่อให้เส้นตาราง คอลัมน์ และสระภาษาไทยคมชัดสมบูรณ์ 100% ไม่เพี้ยนจาก html2canvas
+ * วาดใบสอนแทนลงบน HTML5 Canvas 2D โดยตรงด้วยความละเอียดสูง (2x A4 = 1588x2246 px)
+ * บังคับใช้ฟอนต์เว็บ Sarabun เดียวกันทุกเครื่อง และปรับขนาดอัตโนมัติไม่ให้ล้นหรือตกบรรทัดในทุกอุปกรณ์
  */
 export async function renderPaperToCanvas(
   absentTeacher: TeacherRecord,
@@ -118,9 +153,7 @@ export async function renderPaperToCanvas(
   reason: string,
   rows: SubstituteRow[]
 ): Promise<HTMLCanvasElement> {
-  if (document.fonts?.ready) {
-    await document.fonts.ready;
-  }
+  await ensureSarabunFontLoaded();
 
   const scale = 2;
   const pageWidth = 794;
@@ -143,7 +176,7 @@ export async function renderPaperToCanvas(
 
   const marginX = 44;
   const contentWidth = pageWidth - marginX * 2; // 706px
-  const fontStack = "'Sarabun', 'TH Sarabun PSK', sans-serif";
+  const fontStack = "'Sarabun', sans-serif";
 
   // 1. วาดตราโรงเรียนตรงกลางด้านบน
   let cursorY = 42;
@@ -162,15 +195,27 @@ export async function renderPaperToCanvas(
   ctx.textAlign = "center";
   ctx.textBaseline = "alphabetic";
 
-  ctx.font = `700 24px ${fontStack}`;
-  ctx.fillText("โรงเรียนวรคุณอุปถัมภ์", pageWidth / 2, cursorY);
+  drawFittedCellLine(
+    ctx,
+    "โรงเรียนวรคุณอุปถัมภ์",
+    pageWidth / 2,
+    cursorY,
+    contentWidth,
+    24,
+    "700",
+    fontStack
+  );
   cursorY += 30;
 
-  ctx.font = `700 18.5px ${fontStack}`;
-  ctx.fillText(
+  drawFittedCellLine(
+    ctx,
     `ตารางสอนแทน ภาคเรียนที่ 2 ปีการศึกษา 2569 กลุ่ม/ฝ่าย/งาน ${absentTeacher.pdfGroup}`,
     pageWidth / 2,
-    cursorY
+    cursorY,
+    contentWidth,
+    18.5,
+    "700",
+    fontStack
   );
   cursorY += 36;
 
@@ -179,20 +224,29 @@ export async function renderPaperToCanvas(
   const dayLabel = d >= 0 ? DAYS[d] : "-";
 
   ctx.textAlign = "left";
-  ctx.font = `400 17px ${fontStack}`;
-  ctx.fillText(
+  drawFittedCellLine(
+    ctx,
     `ครูผู้สอน ${absentTeacher.id} ${absentTeacher.n}     วัน${dayLabel}ที่ ${formatThaiDate(
       dateStr
     )}`,
     marginX,
-    cursorY
+    cursorY,
+    contentWidth,
+    17,
+    "400",
+    fontStack
   );
   cursorY += 26;
 
-  ctx.fillText(
+  drawFittedCellLine(
+    ctx,
     `ไม่สามารถปฏิบัติการสอนได้เนื่องจาก ${reason || "-"} จึงมอบหมายให้สอนแทนดังนี้`,
     marginX,
-    cursorY
+    cursorY,
+    contentWidth,
+    17,
+    "400",
+    fontStack
   );
   cursorY += 18;
 
@@ -219,7 +273,6 @@ export async function renderPaperToCanvas(
 
   // เส้นตารางและข้อความหัวตาราง
   let colX = marginX;
-  ctx.font = `700 14.5px ${fontStack}`;
   ctx.fillStyle = "#000000";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
@@ -227,13 +280,21 @@ export async function renderPaperToCanvas(
   for (let i = 0; i < headers.length; i++) {
     const w = colWidths[i];
     ctx.strokeRect(colX, cursorY, w, headerHeight);
-    ctx.fillText(headers[i], colX + w / 2, cursorY + headerHeight / 2 + 1);
+    drawFittedCellLine(
+      ctx,
+      headers[i],
+      colX + w / 2,
+      cursorY + headerHeight / 2 + 1,
+      w - 10,
+      14.5,
+      "700",
+      fontStack
+    );
     colX += w;
   }
   cursorY += headerHeight;
 
-  // วาดแถวข้อมูลแต่ละคาบ (ใช้ขนาด 14px เพื่อไม่ให้ตัวเลขเวลาหรือข้อความชิดเส้นขอบตาราง)
-  ctx.font = `400 14px ${fontStack}`;
+  // วาดแถวข้อมูลแต่ละคาบ (ใช้ขนาด 14px พร้อมระบบปรับขนาดอัตโนมัติหากข้อความยาว)
   for (const row of rows) {
     const cellValues = [
       String(row.p),
@@ -246,6 +307,7 @@ export async function renderPaperToCanvas(
       "",
     ];
 
+    ctx.font = `400 14px ${fontStack}`;
     // คำนวณการตัดบรรทัดของแต่ละช่อง (เฉพาะคอลัมน์ผู้สอนแทนที่ตัดตามเว้นวรรคได้ ส่วนกลุ่มสาระห้ามฉีกคำ)
     const wrappedCells = cellValues.map((val, idx) =>
       idx === 5 ? wrapCanvasText(ctx, val, colWidths[idx] - 16, false) : [val]
@@ -268,13 +330,31 @@ export async function renderPaperToCanvas(
         // คอลัมน์ผู้สอนแทน จัดชิดซ้ายพร้อมระยะห่างจากเส้นตาราง
         ctx.textAlign = "left";
         lines.forEach((line, lIdx) => {
-          ctx.fillText(line, x + 9, startY + lIdx * lineHeight);
+          drawFittedCellLine(
+            ctx,
+            line,
+            x + 9,
+            startY + lIdx * lineHeight,
+            w - 16,
+            14,
+            "400",
+            fontStack
+          );
         });
       } else {
-        // คอลัมน์อื่น จัดกึ่งกลาง
+        // คอลัมน์อื่น จัดกึ่งกลางพร้อมระยะห่างซ้ายขวาอย่างน้อยข้างละ 6px
         ctx.textAlign = "center";
         lines.forEach((line, lIdx) => {
-          ctx.fillText(line, x + w / 2, startY + lIdx * lineHeight);
+          drawFittedCellLine(
+            ctx,
+            line,
+            x + w / 2,
+            startY + lIdx * lineHeight,
+            w - 12,
+            14,
+            "400",
+            fontStack
+          );
         });
       }
 
