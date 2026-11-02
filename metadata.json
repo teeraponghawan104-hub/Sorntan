@@ -1,0 +1,6 @@
+{
+  "name": "ระบบจัดสอนแทน โรงเรียนวรคุณอุปถัมภ์",
+  "description": "ระบบจัดครูสอนแทนและฐานข้อมูลตารางสอนครูครบถ้วน ภาคเรียนที่ 2 ปีการศึกษา 2569 โรงเรียนวรคุณอุปถัมภ์ พร้อมออกใบสอนแทน Word, PDF และรูปภาพ",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

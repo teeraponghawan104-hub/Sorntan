@@ -1,0 +1,13 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  body {
+    font-family: 'TH Sarabun PSK', 'Sarabun', sans-serif;
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+.paper-sheet {
+  font-family: 'TH Sarabun PSK', 'Sarabun', sans-serif;
+}
