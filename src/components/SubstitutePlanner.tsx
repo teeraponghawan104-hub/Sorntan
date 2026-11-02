@@ -496,7 +496,7 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
           <div
             id="paper"
             ref={paperRef}
-            className="paper-sheet w-[794px] min-h-[1123px] bg-white text-black px-[52px] py-[48px] mx-auto shadow-md print:shadow-none text-[18px] leading-[1.35]"
+            className="paper-sheet w-[794px] min-h-[1123px] bg-white text-black px-[44px] py-[48px] mx-auto shadow-md print:shadow-none text-[18px] leading-[1.35]"
           >
             {!absentTeacher || dayIdx < 0 || docRows.length === 0 ? (
               <div className="text-center mt-[200px] text-neutral-500">
@@ -541,42 +541,42 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
 
                 <table
                   style={{ borderCollapse: "collapse", tableLayout: "fixed" }}
-                  className="w-full mt-4 text-[15.5px] border border-black"
+                  className="w-full mt-4 text-[14px] border border-black"
                 >
                   <colgroup>
-                    <col style={{ width: "52px" }} />
-                    <col style={{ width: "96px" }} />
-                    <col style={{ width: "82px" }} />
-                    <col style={{ width: "46px" }} />
-                    <col style={{ width: "78px" }} />
-                    <col style={{ width: "166px" }} />
-                    <col style={{ width: "86px" }} />
-                    <col style={{ width: "84px" }} />
+                    <col style={{ width: "54px" }} />
+                    <col style={{ width: "98px" }} />
+                    <col style={{ width: "72px" }} />
+                    <col style={{ width: "44px" }} />
+                    <col style={{ width: "72px" }} />
+                    <col style={{ width: "184px" }} />
+                    <col style={{ width: "102px" }} />
+                    <col style={{ width: "80px" }} />
                   </colgroup>
                   <thead>
-                    <tr className="bg-[#e8edf7]">
-                      <th className="border border-black px-1 py-2 text-center font-bold whitespace-nowrap">
+                    <tr className="bg-[#e8edf7] text-[14.5px]">
+                      <th className="border border-black px-1.5 py-2 text-center font-bold whitespace-nowrap">
                         คาบที่
                       </th>
-                      <th className="border border-black px-1 py-2 text-center font-bold whitespace-nowrap">
+                      <th className="border border-black px-1.5 py-2 text-center font-bold whitespace-nowrap">
                         เวลา
                       </th>
-                      <th className="border border-black px-1 py-2 text-center font-bold whitespace-nowrap">
+                      <th className="border border-black px-1.5 py-2 text-center font-bold whitespace-nowrap">
                         รหัสวิชา
                       </th>
                       <th className="border border-black px-1 py-2 text-center font-bold whitespace-nowrap">
                         ชั้น
                       </th>
-                      <th className="border border-black px-1 py-2 text-center font-bold whitespace-nowrap">
+                      <th className="border border-black px-1.5 py-2 text-center font-bold whitespace-nowrap">
                         ห้องเรียน
                       </th>
                       <th className="border border-black px-2 py-2 text-center font-bold whitespace-nowrap">
                         ผู้สอนแทน
                       </th>
-                      <th className="border border-black px-1 py-2 text-center font-bold whitespace-nowrap">
+                      <th className="border border-black px-1.5 py-2 text-center font-bold whitespace-nowrap">
                         กลุ่มสาระ
                       </th>
-                      <th className="border border-black px-1 py-2 text-center font-bold whitespace-nowrap">
+                      <th className="border border-black px-1.5 py-2 text-center font-bold whitespace-nowrap">
                         ลายมือชื่อ
                       </th>
                     </tr>
@@ -584,28 +584,28 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                   <tbody>
                     {docRows.map((row) => (
                       <tr key={row.p} className="align-middle">
-                        <td className="border border-black px-1 py-2 text-center whitespace-nowrap">
+                        <td className="border border-black px-1.5 py-2 text-center whitespace-nowrap">
                           {row.p}
                         </td>
-                        <td className="border border-black px-1 py-2 text-center whitespace-nowrap">
+                        <td className="border border-black px-1.5 py-2 text-center whitespace-nowrap">
                           {row.tm}
                         </td>
-                        <td className="border border-black px-1 py-2 text-center whitespace-nowrap">
+                        <td className="border border-black px-1.5 py-2 text-center whitespace-nowrap">
                           {row.code}
                         </td>
                         <td className="border border-black px-1 py-2 text-center whitespace-nowrap">
                           {row.cls}
                         </td>
-                        <td className="border border-black px-1 py-2 text-center">
+                        <td className="border border-black px-1.5 py-2 text-center whitespace-nowrap">
                           {row.room}
                         </td>
-                        <td className="border border-black px-2 py-2 text-left leading-snug break-words">
+                        <td className="border border-black px-2.5 py-2 text-left leading-snug">
                           {row.n}
                         </td>
-                        <td className="border border-black px-1 py-2 text-center leading-snug">
+                        <td className="border border-black px-1.5 py-2 text-center leading-snug whitespace-nowrap">
                           {row.g}
                         </td>
-                        <td className="border border-black px-1 py-2 text-center"></td>
+                        <td className="border border-black px-1.5 py-2 text-center"></td>
                       </tr>
                     ))}
                   </tbody>

@@ -66,13 +66,14 @@ function loadImage(src: string): Promise<HTMLImageElement> {
 function wrapCanvasText(
   ctx: CanvasRenderingContext2D,
   text: string,
-  maxWidth: number
+  maxWidth: number,
+  allowCharSplit = false
 ): string[] {
   const str = String(text || "");
-  if (ctx.measureText(str).width <= maxWidth) {
+  if (!str || ctx.measureText(str).width <= maxWidth) {
     return [str];
   }
-  // ลองตัดตามช่องว่างก่อน
+  // ตัดตามช่องว่างระหว่างคำ (เช่น ชื่อ นามสกุล หรือวงเล็บ) เพื่อไม่ให้ฉีกคำภาษาไทยกลางคำ
   const words = str.split(" ");
   if (words.length > 1) {
     const lines: string[] = [];
@@ -89,7 +90,10 @@ function wrapCanvasText(
     lines.push(current);
     return lines;
   }
-  // กรณีไม่มีช่องว่าง ตัดตามความยาวตัวอักษร
+  if (!allowCharSplit) {
+    return [str];
+  }
+  // กรณีบังคับตัดตัวอักษร
   const lines: string[] = [];
   let current = "";
   for (const ch of str) {
@@ -137,8 +141,8 @@ export async function renderPaperToCanvas(
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, pageWidth, pageHeight);
 
-  const marginX = 52;
-  const contentWidth = pageWidth - marginX * 2; // 690px
+  const marginX = 44;
+  const contentWidth = pageWidth - marginX * 2; // 706px
   const fontStack = "'Sarabun', 'TH Sarabun PSK', sans-serif";
 
   // 1. วาดตราโรงเรียนตรงกลางด้านบน
@@ -192,8 +196,8 @@ export async function renderPaperToCanvas(
   );
   cursorY += 18;
 
-  // 4. วาดตาราง 8 คอลัมน์ (ผลรวมความกว้าง = 690px พอดี)
-  const colWidths = [52, 96, 82, 46, 78, 166, 86, 84];
+  // 4. วาดตาราง 8 คอลัมน์ (ผลรวมความกว้าง = 706px พอดี เว้นระยะขอบซ้ายขวาในช่องอย่างสมดุล)
+  const colWidths = [54, 98, 72, 44, 72, 184, 102, 80];
   const headers = [
     "คาบที่",
     "เวลา",
@@ -215,7 +219,7 @@ export async function renderPaperToCanvas(
 
   // เส้นตารางและข้อความหัวตาราง
   let colX = marginX;
-  ctx.font = `700 15.5px ${fontStack}`;
+  ctx.font = `700 14.5px ${fontStack}`;
   ctx.fillStyle = "#000000";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
@@ -228,8 +232,8 @@ export async function renderPaperToCanvas(
   }
   cursorY += headerHeight;
 
-  // วาดแถวข้อมูลแต่ละคาบ
-  ctx.font = `400 15.5px ${fontStack}`;
+  // วาดแถวข้อมูลแต่ละคาบ (ใช้ขนาด 14px เพื่อไม่ให้ตัวเลขเวลาหรือข้อความชิดเส้นขอบตาราง)
+  ctx.font = `400 14px ${fontStack}`;
   for (const row of rows) {
     const cellValues = [
       String(row.p),
@@ -242,12 +246,12 @@ export async function renderPaperToCanvas(
       "",
     ];
 
-    // คำนวณการตัดบรรทัดของแต่ละช่อง
+    // คำนวณการตัดบรรทัดของแต่ละช่อง (เฉพาะคอลัมน์ผู้สอนแทนที่ตัดตามเว้นวรรคได้ ส่วนกลุ่มสาระห้ามฉีกคำ)
     const wrappedCells = cellValues.map((val, idx) =>
-      wrapCanvasText(ctx, val, colWidths[idx] - 12)
+      idx === 5 ? wrapCanvasText(ctx, val, colWidths[idx] - 16, false) : [val]
     );
     const maxLines = Math.max(...wrappedCells.map((lines) => lines.length), 1);
-    const rowHeight = Math.max(36, maxLines * 22 + 12);
+    const rowHeight = Math.max(36, maxLines * 20 + 14);
 
     let x = marginX;
     for (let i = 0; i < cellValues.length; i++) {
@@ -256,15 +260,15 @@ export async function renderPaperToCanvas(
       ctx.strokeRect(x, cursorY, w, rowHeight);
 
       const lines = wrappedCells[i];
-      const lineHeight = 21;
+      const lineHeight = 20;
       const totalTextHeight = lines.length * lineHeight;
       const startY = cursorY + (rowHeight - totalTextHeight) / 2 + lineHeight / 2 + 1;
 
       if (i === 5) {
-        // คอลัมน์ผู้สอนแทน จัดชิดซ้าย
+        // คอลัมน์ผู้สอนแทน จัดชิดซ้ายพร้อมระยะห่างจากเส้นตาราง
         ctx.textAlign = "left";
         lines.forEach((line, lIdx) => {
-          ctx.fillText(line, x + 7, startY + lIdx * lineHeight);
+          ctx.fillText(line, x + 9, startY + lIdx * lineHeight);
         });
       } else {
         // คอลัมน์อื่น จัดกึ่งกลาง
@@ -284,12 +288,12 @@ export async function renderPaperToCanvas(
   cursorY += 54;
   ctx.textAlign = "center";
   ctx.textBaseline = "alphabetic";
-  ctx.font = `400 15.5px ${fontStack}`;
+  ctx.font = `400 15px ${fontStack}`;
 
   const sigPositions = [
-    marginX + 106,
+    marginX + 108,
     marginX + contentWidth / 2,
-    marginX + contentWidth - 106,
+    marginX + contentWidth - 108,
   ];
   const sigTitles = [
     "ผู้สอนแทน",
@@ -329,7 +333,7 @@ export async function generateDocxBlob(
       t
     )}</w:t></w:r></w:p>`;
 
-  const W = [600, 1400, 1150, 650, 1100, 2400, 1100, 1800];
+  const W = [760, 1420, 1020, 620, 1020, 2600, 1540, 1220];
   const H = [
     "คาบที่",
     "เวลา",
@@ -348,7 +352,7 @@ export async function generateDocxBlob(
       c: i !== 5,
       b,
       a: 0,
-      z: 30,
+      z: 28,
     })}</w:tc>`;
 
   const bd = ["top", "left","bottom", "right", "insideH", "insideV"]
