@@ -6,6 +6,11 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Connection test endpoint
+    match /test/connection {
+      allow get: if true;
+    }
+
     // Hardened Global Helpers
     function isValidId(id) {
       return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
@@ -129,7 +134,7 @@ service cloud.firestore {
       allow update: if isValidId(teacherId) && isValidTeacher(incoming()) &&
         existing().ownerId == 'worakhun_shared' &&
         incoming().ownerId == existing().ownerId &&
-        incoming().createdAt == existing().createdAt &&
+        ('createdAt' in existing() ? incoming().createdAt == existing().createdAt : incoming().createdAt == request.time) &&
         incoming().updatedAt == request.time &&
         incoming().diff(existing()).affectedKeys().hasOnly([
           'id',
@@ -142,6 +147,8 @@ service cloud.firestore {
           'otherSummary',
           's',
           'isStudentTeacher',
+          'ownerId',
+          'createdAt',
           'updatedAt'
         ]);
       allow delete: if isValidId(teacherId) && existing().ownerId == 'worakhun_shared';
@@ -159,9 +166,10 @@ service cloud.firestore {
         existing().ownerId == 'worakhun_shared' &&
         incoming().recordId == existing().recordId &&
         incoming().ownerId == existing().ownerId &&
-        incoming().createdAt == existing().createdAt &&
+        ('createdAt' in existing() ? incoming().createdAt == existing().createdAt : incoming().createdAt == request.time) &&
         incoming().updatedAt == request.time &&
         incoming().diff(existing()).affectedKeys().hasOnly([
+          'recordId',
           'absentTeacherId',
           'absentTeacherName',
           'absentTeacherGroup',
@@ -170,6 +178,8 @@ service cloud.firestore {
           'studentTeacherName',
           'includeSupervision',
           'assignmentsJson',
+          'ownerId',
+          'createdAt',
           'updatedAt'
         ]);
       allow delete: if isValidId(recordId) && existing().ownerId == 'worakhun_shared';
