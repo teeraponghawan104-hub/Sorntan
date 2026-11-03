@@ -241,23 +241,89 @@ function resolveRowAbsentTeacherName(row: SubstituteRow, absentTeacher: TeacherR
  *     กล่องซ้าย: (นายรณสิทธิ์ ประดับศรี) งานการจัดการเรียนการสอน
  *     กล่องขวา: (นายสุทธิศักดิ์ เกตษา) ผู้ช่วยผู้อำนวยการโรงเรียนวรคุณอุปถัมภ์
  */
-export async function renderPaperToCanvas(
+export const TH_SARABUN_FONT_STACK =
+  "'TH Sarabun PSK', 'THSarabunPSK', 'TH Sarabun New', 'Sarabun', sans-serif";
+
+/**
+ * แบ่งแถวคาบสอนแทนออกเป็นหน้าๆ โดยอิงจากขอบกระดาษ A4 แนวนอน (เอกสารราชการ)
+ * - หน้าที่มีกล่องลงนาม (หน้าเดียว หรือหน้าสุดท้าย): บรรจุได้สูงสุด 11 คาบ เพื่อป้องกันไม่ให้ตารางชนหรือทับกล่องลงนามเด็ดขาด
+ * - หน้าที่ไม่มีกล่องลงนาม (หน้าแรกของเอกสารหลายหน้า): บรรจุได้ถึง 14 คาบ ชิดขอบกระดาษล่าง
+ * - หน้าสุดท้าย: ต้องมีคาบสอนเหลืออยู่อย่างน้อย 2 คาบ พร้อมกล่องลงนามท้ายเอกสาร
+ */
+export function chunkSubstituteRows(
+  rows: SubstituteRow[],
+  maxSinglePage = 11,
+  maxNonFinalPage = 14,
+  minFinalPageRows = 2
+): SubstituteRow[][] {
+  if (rows.length === 0) return [[]];
+  if (rows.length <= maxSinglePage) {
+    return [rows];
+  }
+
+  const pages: SubstituteRow[][] = [];
+  let remaining = [...rows];
+
+  while (remaining.length > 0) {
+    // ถ้าเป็นหน้าสุดท้ายแล้ว และจำนวนแถวที่เหลือสามารถใส่พร้อมกล่องลงนามได้ (<= maxSinglePage)
+    if (pages.length > 0 && remaining.length <= maxSinglePage) {
+      pages.push(remaining);
+      break;
+    }
+
+    // จำนวนแถวที่จะใส่ในหน้านี้ (สูงสุด 14 แถว)
+    let take = Math.min(maxNonFinalPage, remaining.length);
+    const leftover = remaining.length - take;
+
+    // ถ้าตัดไปแล้ว หน้าสุดท้ายจะเหลือน้อยกว่า minFinalPageRows
+    if (leftover < minFinalPageRows) {
+      // ปรับให้หน้าสุดท้ายมีอย่างน้อย 4 แถว (เช่น 15 แถว: หน้าแรกได้ 11 แถว, หน้าสุดท้ายได้ 4 แถว)
+      take = Math.max(1, remaining.length - 4);
+    } else if (leftover > maxSinglePage) {
+      // ถ้าแถวที่เหลือยังเกินความจุหน้าสุดท้าย ให้กระจายให้สมดุล
+      take = Math.min(maxNonFinalPage, Math.ceil(remaining.length / 2));
+    }
+
+    if (take <= 0) {
+      take = Math.min(maxNonFinalPage, Math.ceil(remaining.length / 2));
+    }
+
+    pages.push(remaining.slice(0, take));
+    remaining = remaining.slice(take);
+  }
+
+  return pages;
+}
+
+/**
+ * วาดแบบบันทึกการจัดสอนแทน 1 หน้า (A4 Landscape: 1123 x 794 px)
+ * ตัวหนังสือขนาดมาตรฐาน 16pt TH Sarabun PSK (บนจอ 96 DPI คือ 21.3px)
+ */
+export async function renderPaperPageCanvas(
   absentTeacher: TeacherRecord,
   dateStr: string,
   reason: string,
-  rows: SubstituteRow[]
+  pageRows: SubstituteRow[],
+  startRowIdx: number,
+  pageIndex: number,
+  totalPages: number,
+  isLastPage: boolean
 ): Promise<HTMLCanvasElement> {
   await ensureSarabunFontLoaded();
 
-  const scale = 2;
-  const pageWidth = 1123; // A4 Landscape width
+  const scale = 2; // ความละเอียดสูง 2x (2246 x 1588 px)
+  const pageWidth = 1123;
+  const pageHeight = 794;
   const marginX = 48;
-  const contentWidth = pageWidth - marginX * 2; // 1027px
-  const fontStack = "'Sarabun', sans-serif";
+  const fontStack = TH_SARABUN_FONT_STACK;
 
-  // ความกว้างทั้ง 10 คอลัมน์ รวม = 1027px
-  // [ที่ 38, ชื่อ-สกุล ผู้สอนแทน 214, สอนแทน 195, คาบที่ 60, ห้อง 68, วิชา 100, รหัสวิชา 78, วันที่ 88, ลงชื่อ 92, หมายเหตุ 94]
-  const colWidths = [38, 214, 195, 60, 68, 100, 78, 88, 92, 94];
+  // ฟอนต์ขนาด 16pt TH Sarabun PSK (= 21.3px บนจอ 96 DPI)
+  const cellFontSize = 21.3;
+  const cellLineHeight = 27;
+
+  // ความกว้างทั้ง 10 คอลัมน์ รวม = 1027px (พอดีหน้า A4 แนวนอน)
+  // [ที่ 40, ชื่อ-สกุล ผู้สอนแทน 210, สอนแทน 195, คาบที่ 60, ห้อง 68, วิชา 100, รหัสวิชา 80, วันที่ 88, ลงชื่อ 92, หมายเหตุ 94]
+  const colWidths = [40, 210, 195, 60, 68, 100, 80, 88, 92, 94];
   const headers = [
     "ที่",
     "ชื่อ-สกุล ผู้สอนแทน",
@@ -271,48 +337,10 @@ export async function renderPaperToCanvas(
     "หมายเหตุ",
   ];
 
-  const isCompactMode = rows.length > 9;
-  const cellFontSize = isCompactMode ? 14 : 15;
-  const lineHeight = isCompactMode ? 19 : 21;
-  const minRowHeight = isCompactMode ? 35 : 40;
-  const headerHeight = 40;
-
-  const measureCanvas = document.createElement("canvas");
-  const measureCtx = measureCanvas.getContext("2d");
-
-  let estimatedTableRowsHeight = 0;
-  for (let idx = 0; idx < rows.length; idx++) {
-    const row = rows[idx];
-    const subDisplay = row.subName || formatCleanSubstituteName(row.n);
-    const absentDisplay = resolveRowAbsentTeacherName(row, absentTeacher);
-    let maxLines = 1;
-    if (measureCtx) {
-      measureCtx.font = `400 ${cellFontSize}px ${fontStack}`;
-      const subLines = wrapCanvasText(measureCtx, subDisplay, colWidths[1] - 18, false);
-      const absLines = wrapCanvasText(measureCtx, absentDisplay, colWidths[2] - 18, false);
-      maxLines = Math.max(subLines.length, absLines.length, 1);
-    }
-    estimatedTableRowsHeight += Math.max(
-      minRowHeight,
-      maxLines * lineHeight + (isCompactMode ? 12 : 16)
-    );
-  }
-
-  const headerTopY = 36;
-  const tableStartY = headerTopY + 114;
-  const gapBeforeSigBoxes = isCompactMode ? 48 : 66;
-  const sigBoxHeight = 110;
-  const bottomMargin = 48;
-
-  const estimatedTotalHeight =
-    tableStartY +
-    headerHeight +
-    estimatedTableRowsHeight +
-    gapBeforeSigBoxes +
-    sigBoxHeight +
-    bottomMargin;
-
-  const pageHeight = Math.max(794, estimatedTotalHeight);
+  const headerTopY = 32;
+  const tableStartY = 132;
+  const headerRowHeight = pageRows.length > 10 ? 36 : pageRows.length > 6 ? 38 : 42;
+  const dataRowHeight = pageRows.length > 10 ? 35 : pageRows.length > 6 ? 38 : 42;
 
   const canvas = document.createElement("canvas");
   canvas.width = pageWidth * scale;
@@ -325,39 +353,39 @@ export async function renderPaperToCanvas(
 
   ctx.scale(scale, scale);
 
-  // พื้นหลังสีขาว
+  // พื้นหลังกระดาษขาว
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, pageWidth, pageHeight);
   ctx.textBaseline = "alphabetic";
 
-  // 1. วาดโลโก้ด้านซ้าย (ตราโรงเรียนวรคุณอุปถัมภ์) และโลโก้ด้านขวา (หมายเลข 1 สพฐ.)
+  // 1. วาดโลโก้ซ้าย (ตราโรงเรียนวรคุณอุปถัมภ์) และโลโก้ขวา (ตราหมายเลข 1)
   try {
     const leftLogoImg = await loadImage(LEFT_SCHOOL_LOGO_URL).catch(() =>
       loadImage(SCHOOL_LOGO)
     );
-    const leftLogoH = 98;
+    const leftLogoH = 88;
     const leftLogoW = (leftLogoImg.naturalWidth / leftLogoImg.naturalHeight) * leftLogoH;
     const leftCenterX = marginX + 258;
     ctx.drawImage(
       leftLogoImg,
       leftCenterX - leftLogoW / 2,
-      headerTopY - 4,
+      headerTopY,
       leftLogoW,
       leftLogoH
     );
   } catch {
-    // Skip if logo fails
+    // Skip if left logo fails
   }
 
   try {
     const rightLogoImg = await loadImage(RIGHT_OBEC_LOGO_URL);
-    const rightLogoH = 90;
+    const rightLogoH = 82;
     const rightLogoW = (rightLogoImg.naturalWidth / rightLogoImg.naturalHeight) * rightLogoH;
     const rightCenterX = pageWidth - marginX - 252;
     ctx.drawImage(
       rightLogoImg,
       rightCenterX - rightLogoW / 2,
-      headerTopY,
+      headerTopY + 3,
       rightLogoW,
       rightLogoH
     );
@@ -365,63 +393,77 @@ export async function renderPaperToCanvas(
     // Skip if right logo fails
   }
 
-  // 2. วาดหัวกระดาษตรงกลาง 2 บรรทัด
+  // 2. วาดหัวกระดาษตรงกลาง (ตัวหนังสือ TH Sarabun PSK ตัวหนา)
   ctx.fillStyle = "#000000";
   ctx.textAlign = "center";
 
+  // "แบบบันทึกการจัดสอนแทน" ขนาด 20pt (= 26.7px)
   drawFittedCellLine(
     ctx,
     "แบบบันทึกการจัดสอนแทน",
     pageWidth / 2,
     headerTopY + 38,
-    420,
-    20,
+    440,
+    26.7,
     "700",
     fontStack
   );
 
+  // "ประจำเดือน ... พ.ศ. ..." ขนาด 16pt (= 21.3px)
   const monthYearTitle = formatThaiMonthYearHeader(dateStr);
   drawFittedCellLine(
     ctx,
     monthYearTitle,
     pageWidth / 2,
-    headerTopY + 86,
+    headerTopY + 80,
     460,
-    19,
+    21.3,
     "700",
     fontStack
   );
 
-  // 3. วาดตาราง 10 คอลัมน์ (เส้นขอบสีดำคมชัด พื้นหลังสีขาวตามภาพที่ 1)
+  // กรณีมีหลายหน้า แสดงตัวเลขหน้าที่มุมขวาบนเบาๆ
+  if (totalPages > 1) {
+    ctx.font = `400 16px ${fontStack}`;
+    ctx.fillStyle = "#64748b";
+    ctx.textAlign = "right";
+    ctx.fillText(`(หน้าที่ ${pageIndex + 1}/${totalPages})`, pageWidth - marginX, headerTopY + 16);
+    ctx.fillStyle = "#000000";
+  }
+
+  // 3. วาดตาราง 10 คอลัมน์ (เส้นขอบสีดำคมชัด ขนาด 16pt TH Sarabun PSK)
   let cursorY = tableStartY;
-  ctx.lineWidth = 1.15;
+  ctx.lineWidth = 1.2;
   ctx.strokeStyle = "#000000";
   ctx.fillStyle = "#000000";
 
+  // 3.1 หัวตาราง 10 คอลัมน์
   let colX = marginX;
   for (let i = 0; i < headers.length; i++) {
     const w = colWidths[i];
-    ctx.strokeRect(colX, cursorY, w, headerHeight);
+    ctx.strokeRect(colX, cursorY, w, headerRowHeight);
     ctx.textAlign = "center";
     drawFittedCellLine(
       ctx,
       headers[i],
       colX + w / 2,
-      cursorY + headerHeight / 2 + 5.5,
+      cursorY + headerRowHeight / 2 + 7.5,
       w - 8,
-      15.5,
+      cellFontSize,
       "700",
       fontStack
     );
     colX += w;
   }
-  cursorY += headerHeight;
+  cursorY += headerRowHeight;
 
+  // 3.2 ข้อมูลแถวคาบสอนแทนในหน้านี้
   const shortDateStr = formatShortThaiDate(dateStr);
   const noteStr = (reason || "ไปราชการ").trim() || "ไปราชการ";
 
-  for (let rowIdx = 0; rowIdx < rows.length; rowIdx++) {
-    const row = rows[rowIdx];
+  for (let rIdx = 0; rIdx < pageRows.length; rIdx++) {
+    const row = pageRows[rIdx];
+    const globalRowNumber = startRowIdx + rIdx + 1;
     const subDisplay = row.subName || formatCleanSubstituteName(row.n);
     const absentDisplay = resolveRowAbsentTeacherName(row, absentTeacher);
     const roomClassDisplay = row.classRoomLabel || formatClassLevelLabel(row.cls);
@@ -430,7 +472,7 @@ export async function renderPaperToCanvas(
     const rowShortDate = row.shortDate || shortDateStr;
 
     const cellValues = [
-      String(rowIdx + 1),
+      String(globalRowNumber),
       subDisplay,
       absentDisplay,
       String(row.p),
@@ -442,147 +484,183 @@ export async function renderPaperToCanvas(
       noteStr,
     ];
 
-    ctx.font = `400 ${cellFontSize}px ${fontStack}`;
-
-    const wrappedCells = cellValues.map((val, idx) =>
-      idx === 1 || idx === 2
-        ? wrapCanvasText(ctx, val, colWidths[idx] - 18, false)
-        : [val]
-    );
-    const maxLines = Math.max(...wrappedCells.map((lines) => lines.length), 1);
-    const rowHeight = Math.max(
-      minRowHeight,
-      maxLines * lineHeight + (isCompactMode ? 12 : 16)
-    );
-
     let x = marginX;
     for (let i = 0; i < cellValues.length; i++) {
       const w = colWidths[i];
-      ctx.strokeRect(x, cursorY, w, rowHeight);
+      ctx.strokeRect(x, cursorY, w, dataRowHeight);
 
-      const lines = wrappedCells[i];
-      const blockHeight = (lines.length - 1) * lineHeight;
-      const firstLineBaselineY = cursorY + rowHeight / 2 - blockHeight / 2 + 5.2;
+      const val = cellValues[i];
+      const baselineY = cursorY + dataRowHeight / 2 + 7.2;
 
-      // คอลัมน์ที่ 2 (ชื่อ-สกุล ผู้สอนแทน) และคอลัมน์ที่ 3 (สอนแทน) จัดชิดซ้ายตามภาพตัวอย่าง
+      // คอลัมน์ที่ 2 (ชื่อ-สกุล ผู้สอนแทน) และคอลัมน์ที่ 3 (สอนแทน) จัดชิดซ้าย
       if (i === 1 || i === 2) {
         ctx.textAlign = "left";
-        lines.forEach((line, lIdx) => {
-          drawFittedCellLine(
-            ctx,
-            line,
-            x + 10,
-            firstLineBaselineY + lIdx * lineHeight,
-            w - 18,
-            cellFontSize,
-            "400",
-            fontStack
-          );
-        });
+        drawFittedCellLine(
+          ctx,
+          val,
+          x + 10,
+          baselineY,
+          w - 18,
+          cellFontSize,
+          "400",
+          fontStack
+        );
       } else {
         ctx.textAlign = "center";
-        lines.forEach((line, lIdx) => {
-          drawFittedCellLine(
-            ctx,
-            line,
-            x + w / 2,
-            firstLineBaselineY + lIdx * lineHeight,
-            w - 10,
-            cellFontSize,
-            "400",
-            fontStack
-          );
-        });
+        drawFittedCellLine(
+          ctx,
+          val,
+          x + w / 2,
+          baselineY,
+          w - 10,
+          cellFontSize,
+          "400",
+          fontStack
+        );
       }
 
       x += w;
     }
 
-    cursorY += rowHeight;
+    cursorY += dataRowHeight;
   }
 
-  // 4. วาดกล่องลงนาม 2 กล่องตีกรอบสี่เหลี่ยมด้านล่าง (ตามภาพที่ 1 เป๊ะ)
-  cursorY += gapBeforeSigBoxes;
-  ctx.lineWidth = 1.6;
-  ctx.strokeStyle = "#000000";
-  ctx.fillStyle = "#000000";
-  ctx.textAlign = "center";
+  // 4. วาดกล่องลงนาม 2 กล่องตีกรอบสี่เหลี่ยมด้านล่าง (เฉพาะหน้าสุดท้ายของเอกสาร)
+  if (isLastPage) {
+    const sigBoxHeight = 104;
+    // ปรับตำแหน่ง Y ของกล่องลงนามให้อิงขอบกระดาษล่างและห่างจากตารางอย่างสมดุล โดยต้องอยู่ใต้ตารางเสมอ
+    const idealSigBoxY = Math.max(cursorY + 22, 620);
+    const maxSigBoxY = pageHeight - 36 - sigBoxHeight;
+    const sigBoxY = Math.max(Math.min(idealSigBoxY, maxSigBoxY), cursorY + 16);
 
-  // กล่องซ้าย: ผู้จัดสอนแทน (นายรณสิทธิ์ ประดับศรี)
-  const leftBoxX = marginX + 58;
-  const leftBoxW = 308;
-  ctx.strokeRect(leftBoxX, cursorY, leftBoxW, sigBoxHeight);
+    ctx.lineWidth = 1.6;
+    ctx.strokeStyle = "#000000";
+    ctx.fillStyle = "#000000";
+    ctx.textAlign = "center";
 
-  const leftCenterX = leftBoxX + leftBoxW / 2;
-  drawFittedCellLine(
-    ctx,
-    "ลงชื่อ.................................ผู้จัดสอนแทน",
-    leftCenterX,
-    cursorY + 30,
-    leftBoxW - 20,
-    15,
-    "400",
-    fontStack
-  );
-  drawFittedCellLine(
-    ctx,
-    "(นายธีระพงษ์ หาวัน)",
-    leftCenterX,
-    cursorY + 62,
-    leftBoxW - 20,
-    15,
-    "400",
-    fontStack
-  );
-  drawFittedCellLine(
-    ctx,
-    "งานการจัดการเรียนการสอน",
-    leftCenterX,
-    cursorY + 93,
-    leftBoxW - 20,
-    15,
-    "400",
-    fontStack
-  );
+    // กล่องซ้าย: ผู้จัดสอนแทน (นายธีระพงษ์ หาวัน)
+    const leftBoxX = marginX + 58;
+    const leftBoxW = 318;
+    ctx.strokeRect(leftBoxX, sigBoxY, leftBoxW, sigBoxHeight);
 
-  // กล่องขวา: หัวหน้ากลุ่มบริหารวิชาการ (นายสุทธิศักดิ์ เกตษา)
-  const rightBoxX = marginX + 536;
-  const rightBoxW = 392;
-  ctx.strokeRect(rightBoxX, cursorY, rightBoxW, sigBoxHeight);
+    const leftCenterX = leftBoxX + leftBoxW / 2;
+    drawFittedCellLine(
+      ctx,
+      "ลงชื่อ.................................ผู้จัดสอนแทน",
+      leftCenterX,
+      sigBoxY + 30,
+      leftBoxW - 20,
+      cellFontSize,
+      "400",
+      fontStack
+    );
+    drawFittedCellLine(
+      ctx,
+      "(นายธีระพงษ์ หาวัน)",
+      leftCenterX,
+      sigBoxY + 62,
+      leftBoxW - 20,
+      cellFontSize,
+      "400",
+      fontStack
+    );
+    drawFittedCellLine(
+      ctx,
+      "งานการจัดการเรียนการสอน",
+      leftCenterX,
+      sigBoxY + 92,
+      leftBoxW - 20,
+      cellFontSize,
+      "400",
+      fontStack
+    );
 
-  const rightCenterX = rightBoxX + rightBoxW / 2;
-  drawFittedCellLine(
-    ctx,
-    "ลงชื่อ.................................หัวหน้ากลุ่มบริหารวิชาการ",
-    rightCenterX,
-    cursorY + 30,
-    rightBoxW - 20,
-    15,
-    "400",
-    fontStack
-  );
-  drawFittedCellLine(
-    ctx,
-    "(นายสุทธิศักดิ์ เกตษา)",
-    rightCenterX,
-    cursorY + 62,
-    rightBoxW - 20,
-    15,
-    "400",
-    fontStack
-  );
-  drawFittedCellLine(
-    ctx,
-    "ผู้ช่วยผู้อำนวยการโรงเรียนวรคุณอุปถัมภ์",
-    rightCenterX,
-    cursorY + 93,
-    rightBoxW - 20,
-    15,
-    "400",
-    fontStack
-  );
+    // กล่องขวา: หัวหน้ากลุ่มบริหารวิชาการ (นายสุทธิศักดิ์ เกตษา)
+    const rightBoxX = marginX + 526;
+    const rightBoxW = 402;
+    ctx.strokeRect(rightBoxX, sigBoxY, rightBoxW, sigBoxHeight);
+
+    const rightCenterX = rightBoxX + rightBoxW / 2;
+    drawFittedCellLine(
+      ctx,
+      "ลงชื่อ.................................หัวหน้ากลุ่มบริหารวิชาการ",
+      rightCenterX,
+      sigBoxY + 30,
+      rightBoxW - 20,
+      cellFontSize,
+      "400",
+      fontStack
+    );
+    drawFittedCellLine(
+      ctx,
+      "(นายสุทธิศักดิ์ เกตษา)",
+      rightCenterX,
+      sigBoxY + 62,
+      rightBoxW - 20,
+      cellFontSize,
+      "400",
+      fontStack
+    );
+    drawFittedCellLine(
+      ctx,
+      "ผู้ช่วยผู้อำนวยการโรงเรียนวรคุณอุปถัมภ์",
+      rightCenterX,
+      sigBoxY + 92,
+      rightBoxW - 20,
+      cellFontSize,
+      "400",
+      fontStack
+    );
+  }
 
   return canvas;
+}
+
+/**
+ * แปลงข้อมูลแถวคาบสอนแทนทั้งหมดให้เป็นชุด Canvas ตามจำนวนหน้า A4 แนวนอน
+ * ถ้าคาบเยอะ จะแบ่งออกเป็นหน้าถัดไป ไม่ยัดใส่หน้าเดียว
+ */
+export async function renderPaperPagesToCanvases(
+  absentTeacher: TeacherRecord,
+  dateStr: string,
+  reason: string,
+  rows: SubstituteRow[]
+): Promise<HTMLCanvasElement[]> {
+  const chunks = chunkSubstituteRows(rows);
+  const canvases: HTMLCanvasElement[] = [];
+
+  let startRowIdx = 0;
+  for (let pIdx = 0; pIdx < chunks.length; pIdx++) {
+    const pageRows = chunks[pIdx];
+    const isLast = pIdx === chunks.length - 1;
+    const canvas = await renderPaperPageCanvas(
+      absentTeacher,
+      dateStr,
+      reason,
+      pageRows,
+      startRowIdx,
+      pIdx,
+      chunks.length,
+      isLast
+    );
+    canvases.push(canvas);
+    startRowIdx += pageRows.length;
+  }
+
+  return canvases;
+}
+
+/**
+ * วาดหน้าแรกของแบบบันทึกการจัดสอนแทน (สำหรับการแสดงผลพรีวิวทั่วไป)
+ */
+export async function renderPaperToCanvas(
+  absentTeacher: TeacherRecord,
+  dateStr: string,
+  reason: string,
+  rows: SubstituteRow[]
+): Promise<HTMLCanvasElement> {
+  const canvases = await renderPaperPagesToCanvases(absentTeacher, dateStr, reason, rows);
+  return canvases[0] || (await renderPaperPageCanvas(absentTeacher, dateStr, reason, rows, 0, 0, 1, true));
 }
 
 export interface SubstituteSheetData {
@@ -592,6 +670,13 @@ export interface SubstituteSheetData {
   rows: SubstituteRow[];
 }
 
+/**
+ * สร้างเนื้อหา Word XML สำหรับแบบบันทึกการจัดสอนแทน
+ * - กำหนดฟอนต์ TH Sarabun PSK ขนาด 16pt มาตรฐานเอกสารราชการไทย
+ * - ตาราง 10 คอลัมน์ความกว้างคงที่ 15200 dxa ตามแบบฟอร์มเป๊ะ
+ * - ถ้ามีหลายคาบ (> 7 คาบ) จะแบ่งหน้าถัดไปอัตโนมัติด้วย Page Break ไม่ยัดใส่หน้าเดียว
+ * - ส่วนลงนาม 2 กล่องตีกรอบสี่เหลี่ยมด้านล่างตรงตามรูปพรีวิว 100%
+ */
 function buildDocxSheetBodyXml(
   absentTeacher: TeacherRecord,
   dateStr: string,
@@ -600,38 +685,28 @@ function buildDocxSheetBodyXml(
   docPrIdBase: number = 1,
   hasRightLogo: boolean = true
 ): string {
+  // ฟอนต์ TH Sarabun PSK ตามที่กำหนด
   const FN =
-    '<w:rFonts w:ascii="Sarabun" w:hAnsi="Sarabun" w:cs="TH Sarabun New" w:eastAsia="Sarabun"/>';
+    '<w:rFonts w:ascii="TH Sarabun PSK" w:hAnsi="TH Sarabun PSK" w:cs="TH Sarabun PSK" w:eastAsia="TH Sarabun PSK"/>';
 
+  // พารากราฟมาตรฐาน กำหนดฟอนต์ TH Sarabun PSK ขนาด 16pt (32 half-points) เป็นค่าเริ่มต้น
   const P = (
     t: string,
     o: { a?: number; bBefore?: number; c?: boolean | number; j?: string; b?: boolean | number; z?: number } = {}
   ) =>
-    `<w:p><w:pPr><w:spacing w:before="${o.bBefore ?? 0}" w:after="${o.a ?? 40}"/><w:jc w:val="${
+    `<w:p><w:pPr><w:spacing w:before="${o.bBefore ?? 0}" w:after="${o.a ?? 0}" w:line="240" w:lineRule="auto"/><w:jc w:val="${
       o.c ? "center" : o.j || "left"
     }"/></w:pPr><w:r><w:rPr>${FN}${o.b ? "<w:b/><w:bCs/>" : ""}<w:sz w:val="${
-      o.z || 22
-    }"/><w:szCs w:val="${o.z || 22}"/></w:rPr><w:t xml:space="preserve">${escapeXml(
+      o.z || 32
+    }"/><w:szCs w:val="${o.z || 32}"/></w:rPr><w:t xml:space="preserve">${escapeXml(
       t
     )}</w:t></w:r></w:p>`;
 
   const inlineImageXml = (rId: string, docId: number, cx: number, cy: number, name: string) =>
-    `<w:p><w:pPr><w:spacing w:before="0" w:after="0"/><w:jc w:val="center"/></w:pPr><w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="${docId}" name="${name}"/><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="0" name="${name}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="${rId}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>`;
+    `<w:p><w:pPr><w:spacing w:before="0" w:after="0" w:line="240" w:lineRule="auto"/><w:jc w:val="center"/></w:pPr><w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="${docId}" name="${name}"/><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="0" name="${name}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="${rId}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>`;
 
-  // หัวกระดาษ 3 คอลัมน์ไร้เส้นขอบ: [โลโก้ซ้าย | แบบบันทึกการจัดสอนแทน + ประจำเดือน ... | โลโก้ขวา]
-  const leftLogoDrawing = inlineImageXml("rId1", docPrIdBase, 680000, 720000, "logo_left.png");
-  const rightLogoDrawing = hasRightLogo
-    ? inlineImageXml("rId2", docPrIdBase + 100, 680000, 680000, "logo_right.png")
-    : P("", { c: 1 });
-
-  const monthYearTitle = formatThaiMonthYearHeader(dateStr);
-  const headerTable = `<w:tbl><w:tblPr><w:tblW w:w="14800" w:type="dxa"/><w:tblLayout w:type="fixed"/></w:tblPr><w:tr><w:tc><w:tcPr><w:tcW w:w="4200" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr>${leftLogoDrawing}</w:tc><w:tc><w:tcPr><w:tcW w:w="6400" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr>${P(
-    "แบบบันทึกการจัดสอนแทน",
-    { c: 1, b: 1, z: 28, a: 120 }
-  )}${P(monthYearTitle, { c: 1, b: 1, z: 26, a: 40 })}</w:tc><w:tc><w:tcPr><w:tcW w:w="4200" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr>${rightLogoDrawing}</w:tc></w:tr></w:tbl>`;
-
-  // ตาราง 10 คอลัมน์ (ความกว้างรวม 14800 dxa สำหรับ A4 แนวนอน)
-  const W = [560, 3080, 2800, 860, 980, 1440, 1140, 1280, 1320, 1340];
+  // ตาราง 10 คอลัมน์ (ความกว้างรวม 15200 dxa สำหรับ A4 แนวนอน)
+  const W = [650, 3000, 2800, 900, 1000, 1550, 1250, 1300, 1350, 1400];
   const H = [
     "ที่",
     "ชื่อ-สกุล ผู้สอนแทน",
@@ -645,6 +720,8 @@ function buildDocxSheetBodyXml(
     "หมายเหตุ",
   ];
 
+  const gridXml = `<w:tblGrid>${W.map((w) => `<w:gridCol w:w="${w}"/>`).join("")}</w:tblGrid>`;
+
   const C = (t: string, i: number, isHeader?: boolean | number) => {
     const isLeftAligned = !isHeader && (i === 1 || i === 2);
     const noWrap = i !== 1 && i !== 2 ? "<w:noWrap/>" : "";
@@ -654,7 +731,7 @@ function buildDocxSheetBodyXml(
         c: !isLeftAligned,
         b: isHeader,
         a: 0,
-        z: isHeader ? 22 : 21,
+        z: 32, // ขนาด 16pt TH Sarabun PSK ตามที่กำหนด
       }
     )}</w:tc>`;
   };
@@ -666,56 +743,109 @@ function buildDocxSheetBodyXml(
   const shortDateStr = formatShortThaiDate(dateStr);
   const noteStr = (reason || "ไปราชการ").trim() || "ไปราชการ";
 
-  const tb = `<w:tbl><w:tblPr><w:tblW w:w="14800" w:type="dxa"/><w:tblBorders>${bd}</w:tblBorders><w:tblLayout w:type="fixed"/><w:tblCellMar><w:top w:w="80" w:type="dxa"/><w:bottom w:w="80" w:type="dxa"/><w:left w:w="100" w:type="dxa"/><w:right w:w="100" w:type="dxa"/></w:tblCellMar></w:tblPr><w:tr>${H.map(
-    (h, i) => C(h, i, 1)
-  ).join("")}</w:tr>${rows
-    .map((row, idx) => {
-      const subDisplay = row.subName || formatCleanSubstituteName(row.n);
-      const absentDisplay = resolveRowAbsentTeacherName(row, absentTeacher);
-      const roomClassDisplay = row.classRoomLabel || formatClassLevelLabel(row.cls);
-      const subjectDisplay =
-        row.subjectName || getSubjectNameFromCourse(row.code, absentTeacher.g);
-      const rowShortDate = row.shortDate || shortDateStr;
-      const vals = [
-        String(idx + 1),
-        subDisplay,
-        absentDisplay,
-        String(row.p),
-        roomClassDisplay,
-        subjectDisplay,
-        row.code,
-        rowShortDate,
-        "",
-        noteStr,
-      ];
-      return `<w:tr>${vals.map((v, i) => C(String(v), i)).join("")}</w:tr>`;
-    })
-    .join("")}</w:tbl>`;
+  // แบ่งแถวออกเป็นหน้าๆ โดยอิงจากขอบกระดาษ A4 แนวนอน
+  const chunks = chunkSubstituteRows(rows);
+  const monthYearTitle = formatThaiMonthYearHeader(dateStr);
 
-  const boxBorders = `<w:tcBorders><w:top w:val="single" w:sz="10" w:space="0" w:color="000000"/><w:left w:val="single" w:sz="10" w:space="0" w:color="000000"/><w:bottom w:val="single" w:sz="10" w:space="0" w:color="000000"/><w:right w:val="single" w:sz="10" w:space="0" w:color="000000"/></w:tcBorders>`;
+  const pageBreakXml = '<w:p><w:r><w:br w:type="page"/></w:r></w:p>';
+
+  // กล่องลงนาม 2 กล่องตีกรอบสี่เหลี่ยมด้านล่าง
+  const boxBorders = `<w:tcBorders><w:top w:val="single" w:sz="12" w:space="0" w:color="000000"/><w:left w:val="single" w:sz="12" w:space="0" w:color="000000"/><w:bottom w:val="single" w:sz="12" w:space="0" w:color="000000"/><w:right w:val="single" w:sz="12" w:space="0" w:color="000000"/></w:tcBorders>`;
   const noBorders = `<w:tcBorders><w:top w:val="nil"/><w:left w:val="nil"/><w:bottom w:val="nil"/><w:right w:val="nil"/></w:tcBorders>`;
 
-  const sigTable = `<w:tbl><w:tblPr><w:tblW w:w="14800" w:type="dxa"/><w:tblLayout w:type="fixed"/><w:tblCellMar><w:top w:w="120" w:type="dxa"/><w:bottom w:w="120" w:type="dxa"/><w:left w:w="120" w:type="dxa"/><w:right w:w="120" w:type="dxa"/></w:tblCellMar></w:tblPr><w:tr><w:tc><w:tcPr><w:tcW w:w="900" w:type="dxa"/>${noBorders}</w:tcPr>${P(
+  const sigGridXml = `<w:tblGrid><w:gridCol w:w="1000"/><w:gridCol w:w="5800"/><w:gridCol w:w="1600"/><w:gridCol w:w="5800"/><w:gridCol w:w="1000"/></w:tblGrid>`;
+
+  const sigTable = `<w:tbl><w:tblPr><w:tblW w:w="15200" w:type="dxa"/><w:tblLayout w:type="fixed"/><w:tblCellMar><w:top w:w="140" w:type="dxa"/><w:bottom w:w="140" w:type="dxa"/><w:left w:w="140" w:type="dxa"/><w:right w:w="140" w:type="dxa"/></w:tblCellMar></w:tblPr>${sigGridXml}<w:tr><w:trPr><w:cantSplit/></w:trPr><w:tc><w:tcPr><w:tcW w:w="1000" w:type="dxa"/>${noBorders}</w:tcPr>${P(
     ""
-  )}</w:tc><w:tc><w:tcPr><w:tcW w:w="4800" w:type="dxa"/>${boxBorders}<w:vAlign w:val="center"/></w:tcPr>${P(
+  )}</w:tc><w:tc><w:tcPr><w:tcW w:w="5800" w:type="dxa"/>${boxBorders}<w:vAlign w:val="center"/></w:tcPr>${P(
     "ลงชื่อ.................................ผู้จัดสอนแทน",
-    { c: 1, a: 80, z: 22 }
-  )}${P("(นายธีระพงษ์ หาวัน)", { c: 1, a: 80, z: 22 })}${P(
+    { c: 1, a: 80, z: 32 }
+  )}${P("(นายธีระพงษ์ หาวัน)", { c: 1, a: 80, z: 32 })}${P(
     "งานการจัดการเรียนการสอน",
-    { c: 1, a: 0, z: 22 }
-  )}</w:tc><w:tc><w:tcPr><w:tcW w:w="2400" w:type="dxa"/>${noBorders}</w:tcPr>${P(
+    { c: 1, a: 0, z: 32 }
+  )}</w:tc><w:tc><w:tcPr><w:tcW w:w="1600" w:type="dxa"/>${noBorders}</w:tcPr>${P(
     ""
   )}</w:tc><w:tc><w:tcPr><w:tcW w:w="5800" w:type="dxa"/>${boxBorders}<w:vAlign w:val="center"/></w:tcPr>${P(
     "ลงชื่อ.................................หัวหน้ากลุ่มบริหารวิชาการ",
-    { c: 1, a: 80, z: 22 }
-  )}${P("(นายสุทธิศักดิ์ เกตษา)", { c: 1, a: 80, z: 22 })}${P(
+    { c: 1, a: 80, z: 32 }
+  )}${P("(นายสุทธิศักดิ์ เกตษา)", { c: 1, a: 80, z: 32 })}${P(
     "ผู้ช่วยผู้อำนวยการโรงเรียนวรคุณอุปถัมภ์",
-    { c: 1, a: 0, z: 22 }
-  )}</w:tc><w:tc><w:tcPr><w:tcW w:w="900" w:type="dxa"/>${noBorders}</w:tcPr>${P(
+    { c: 1, a: 0, z: 32 }
+  )}</w:tc><w:tc><w:tcPr><w:tcW w:w="1000" w:type="dxa"/>${noBorders}</w:tcPr>${P(
     ""
   )}</w:tc></w:tr></w:tbl>`;
 
-  return headerTable + P("", { a: 120 }) + tb + P("", { a: 360 }) + sigTable;
+  let cumulativeRowOffset = 0;
+  const pageXmlParts: string[] = [];
+
+  chunks.forEach((pageChunk, pageIdx) => {
+    const isLast = pageIdx === chunks.length - 1;
+    const curDocId = docPrIdBase + pageIdx * 10;
+
+    // หัวกระดาษ 3 คอลัมน์ไร้เส้นขอบ: [โลโก้ซ้าย | แบบบันทึกการจัดสอนแทน + ประจำเดือน ... | โลโก้ขวา]
+    const leftLogoDrawing = inlineImageXml("rId1", curDocId + 1, 680000, 720000, `logo_left_${pageIdx}.png`);
+    const rightLogoDrawing = hasRightLogo
+      ? inlineImageXml("rId2", curDocId + 2, 680000, 680000, `logo_right_${pageIdx}.png`)
+      : P("", { c: 1 });
+
+    const headerGridXml = `<w:tblGrid><w:gridCol w:w="3800"/><w:gridCol w:w="7600"/><w:gridCol w:w="3800"/></w:tblGrid>`;
+
+    const headerTable = `<w:tbl><w:tblPr><w:tblW w:w="15200" w:type="dxa"/><w:tblLayout w:type="fixed"/></w:tblPr>${headerGridXml}<w:tr><w:tc><w:tcPr><w:tcW w:w="3800" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr>${leftLogoDrawing}</w:tc><w:tc><w:tcPr><w:tcW w:w="7600" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr>${P(
+      "แบบบันทึกการจัดสอนแทน",
+      { c: 1, b: 1, z: 40, a: 80 } // ขนาด 20pt ตัวหนา
+    )}${P(monthYearTitle, { c: 1, b: 1, z: 32, a: 40 })}</w:tc><w:tc><w:tcPr><w:tcW w:w="3800" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr>${rightLogoDrawing}</w:tc></w:tr></w:tbl>`;
+
+    const pageIndicator =
+      chunks.length > 1
+        ? P(`(หน้าที่ ${pageIdx + 1}/${chunks.length})`, { j: "right", z: 24, a: 60 })
+        : "";
+
+    // แถวตาราง 10 คอลัมน์
+    const tableHeaderRowXml = `<w:tr><w:trPr><w:tblHeader/><w:cantSplit/></w:trPr>${H.map(
+      (h, i) => C(h, i, 1)
+    ).join("")}</w:tr>`;
+
+    const dataRowsXml = pageChunk
+      .map((row, idx) => {
+        const globalRowIdx = cumulativeRowOffset + idx + 1;
+        const subDisplay = row.subName || formatCleanSubstituteName(row.n);
+        const absentDisplay = resolveRowAbsentTeacherName(row, absentTeacher);
+        const roomClassDisplay = row.classRoomLabel || formatClassLevelLabel(row.cls);
+        const subjectDisplay =
+          row.subjectName || getSubjectNameFromCourse(row.code, absentTeacher.g);
+        const rowShortDate = row.shortDate || shortDateStr;
+        const vals = [
+          String(globalRowIdx),
+          subDisplay,
+          absentDisplay,
+          String(row.p),
+          roomClassDisplay,
+          subjectDisplay,
+          row.code,
+          rowShortDate,
+          "",
+          noteStr,
+        ];
+        return `<w:tr><w:trPr><w:cantSplit/></w:trPr>${vals.map((v, i) => C(String(v), i)).join("")}</w:tr>`;
+      })
+      .join("");
+
+    const tb = `<w:tbl><w:tblPr><w:tblW w:w="15200" w:type="dxa"/><w:tblBorders>${bd}</w:tblBorders><w:tblLayout w:type="fixed"/><w:tblCellMar><w:top w:w="80" w:type="dxa"/><w:bottom w:w="80" w:type="dxa"/><w:left w:w="120" w:type="dxa"/><w:right w:w="120" w:type="dxa"/></w:tblCellMar></w:tblPr>${gridXml}${tableHeaderRowXml}${dataRowsXml}</w:tbl>`;
+
+    let pageXml = headerTable + pageIndicator + P("", { a: 80 }) + tb;
+
+    // หน้าสุดท้าย: ใส่กล่องลงนาม
+    if (isLast) {
+      const spacingBeforeSig =
+        pageChunk.length > 10 ? 100 : pageChunk.length > 6 ? 160 : 260;
+      pageXml += P("", { a: spacingBeforeSig }) + sigTable;
+    }
+
+    pageXmlParts.push(pageXml);
+    cumulativeRowOffset += pageChunk.length;
+  });
+
+  return pageXmlParts.join(pageBreakXml);
 }
 
 async function generateMultiDocxBlob(sheets: SubstituteSheetData[]): Promise<Blob> {
@@ -745,7 +875,7 @@ async function generateMultiDocxBlob(sheets: SubstituteSheetData[]): Promise<Blo
   z.file(
     "[Content_Types].xml",
     X +
-      '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>'
+      '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/fontTable.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.fontTable+xml"/></Types>'
   );
   z.file(
     "_rels/.rels",
@@ -755,6 +885,7 @@ async function generateMultiDocxBlob(sheets: SubstituteSheetData[]): Promise<Blo
 
   const relsItems = [
     '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/logo_left.png"/>',
+    '<Relationship Id="rIdFont" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable" Target="fontTable.xml"/>',
   ];
   if (hasRightLogo) {
     relsItems.push(
@@ -768,6 +899,11 @@ async function generateMultiDocxBlob(sheets: SubstituteSheetData[]): Promise<Blo
       `<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${relsItems.join(
         ""
       )}</Relationships>`
+  );
+  z.file(
+    "word/fontTable.xml",
+    X +
+      '<w:fonts xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:font w:name="TH Sarabun PSK"><w:altName w:val="TH Sarabun New"/><w:family w:val="swiss"/><w:charset w:val="DE"/></w:font><w:font w:name="TH Sarabun New"><w:family w:val="swiss"/><w:charset w:val="DE"/></w:font><w:font w:name="Sarabun"><w:family w:val="swiss"/></w:font></w:fonts>'
   );
   z.file("word/media/logo_left.png", leftLogoBase64, { base64: true });
   if (hasRightLogo) {
@@ -821,24 +957,80 @@ export async function exportSubstituteDocument(
     return;
   }
 
-  const canvas = await renderPaperToCanvas(absentTeacher, dateStr, reason, rows);
+  const canvases = await renderPaperPagesToCanvases(absentTeacher, dateStr, reason, rows);
 
   if (format === "image") {
-    const blob = await new Promise<Blob | null>((resolve) =>
-      canvas.toBlob(resolve, "image/png")
-    );
-    if (!blob) throw new Error("ไม่สามารถสร้างไฟล์รูปภาพได้");
-    await triggerBrowserDownload(`${baseFilename}.png`, blob, "image/png");
+    // ถ้ามีหน้าเดียว ให้ดาวน์โหลดรูปภาพไฟล์เดียวปกติ
+    if (canvases.length <= 1) {
+      const primaryCanvas = canvases[0];
+      const blob = await new Promise<Blob | null>((resolve) =>
+        primaryCanvas.toBlob(resolve, "image/png")
+      );
+      if (!blob) throw new Error("ไม่สามารถสร้างไฟล์รูปภาพได้");
+      await triggerBrowserDownload(`${baseFilename}.png`, blob, "image/png");
+      return;
+    }
+
+    // กรณีมี 2 หน้าขึ้นไป (หลายตาราง/หลายหน้า) ให้ดาวน์โหลดครบทุกหน้าอัตโนมัติ
+    for (let pIdx = 0; pIdx < canvases.length; pIdx++) {
+      const pageCanvas = canvases[pIdx];
+      const blob = await new Promise<Blob | null>((resolve) =>
+        pageCanvas.toBlob(resolve, "image/png")
+      );
+      if (blob) {
+        await triggerBrowserDownload(
+          `${baseFilename}_หน้า${pIdx + 1}จาก${canvases.length}.png`,
+          blob,
+          "image/png"
+        );
+        // หน่วงเวลา 400ms เพื่อให้เบราว์เซอร์ดาวน์โหลดได้ครบทุกไฟล์โดยไม่บล็อกการดาวน์โหลดต่อเนื่อง
+        if (pIdx < canvases.length - 1) {
+          await new Promise((resolve) => setTimeout(resolve, 400));
+        }
+      }
+    }
     return;
   }
 
+  // ส่งออก PDF ขนาด A4 แนวนอน (297 x 210 mm) หลายหน้าตามจริง ไม่มีการยัดใส่หน้าเดียว
   const pdf = new jsPDF("l", "mm", "a4");
-  const imgData = canvas.toDataURL("image/png");
-  const pdfWidth = 297;
-  const pdfHeight = (pdfWidth * canvas.height) / canvas.width;
-  pdf.addImage(imgData, "PNG", 0, 0, pdfWidth, pdfHeight);
+  canvases.forEach((canvas, idx) => {
+    if (idx > 0) {
+      pdf.addPage("a4", "l");
+    }
+    const imgData = canvas.toDataURL("image/png");
+    pdf.addImage(imgData, "PNG", 0, 0, 297, 210);
+  });
   const pdfBlob = pdf.output("blob");
   await triggerBrowserDownload(`${baseFilename}.pdf`, pdfBlob, "application/pdf");
+}
+
+/**
+ * ดาวน์โหลดรูปภาพเฉพาะหน้าที่เลือก (หน้า 1 หรือ หน้า 2)
+ */
+export async function exportSingleSubstitutePageImage(
+  absentTeacher: TeacherRecord,
+  dateStr: string,
+  reason: string,
+  rows: SubstituteRow[],
+  pageIndex: number
+): Promise<void> {
+  const canvases = await renderPaperPagesToCanvases(absentTeacher, dateStr, reason, rows);
+  const target = canvases[pageIndex] || canvases[0];
+  if (!target) return;
+  const rawIdStr = absentTeacher.pdfGroup ? absentTeacher.pdfGroup.replace(/\s+/g, "") : "";
+  const matchedIds = rawIdStr.match(/\d{3}/g);
+  const idPart =
+    matchedIds && matchedIds.length > 1
+      ? matchedIds.join("-")
+      : String(absentTeacher.id);
+  const pageLabel = canvases.length > 1 ? `_หน้า${pageIndex + 1}จาก${canvases.length}` : "";
+  const baseFilename = `แบบบันทึกการจัดสอนแทน_${idPart}_${dateStr}${pageLabel}.png`;
+  const blob = await new Promise<Blob | null>((resolve) =>
+    target.toBlob(resolve, "image/png")
+  );
+  if (!blob) throw new Error("ไม่สามารถสร้างไฟล์รูปภาพได้");
+  await triggerBrowserDownload(baseFilename, blob, "image/png");
 }
 
 export async function exportMultipleSubstituteDocuments(

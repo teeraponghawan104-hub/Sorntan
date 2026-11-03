@@ -12,6 +12,7 @@ import {
   buildCombinedTeacherHeader,
   getCombinedTeacherClasses,
   getInitialWeekdayDate,
+  isTeacherExemptFromNeedingSubstitute,
 } from "./utils/scheduler";
 import { OperationType, db, handleFirestoreError } from "./firebase";
 import {
@@ -25,7 +26,6 @@ import {
   loadLocalTeachers,
   removeSubstituteRecordFromDatabase,
   removeTeacherFromDatabase,
-  saveLiveWorkspaceToCloud,
   saveLocalPlannerState,
   saveLocalSubstituteRecords,
   saveLocalTeachers,
@@ -33,8 +33,6 @@ import {
   upsertSubstituteRecordInDatabase,
   upsertTeacherInDatabase,
 } from "./utils/databaseStore";
-
-const CLIENT_SESSION_ID = Math.random().toString(36).slice(2, 10);
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>("planner");
@@ -45,7 +43,6 @@ export default function App() {
   const [savedRecords, setSavedRecords] = useState<SavedSubstituteRecord[]>(() =>
     loadLocalSubstituteRecords()
   );
-  const [autoSaveState, setAutoSaveState] = useState<"idle" | "saving" | "saved">("saved");
 
   // สถานะ Modal แก้ไข/เพิ่มครู
   const [editorModalOpen, setEditorModalOpen] = useState<boolean>(false);
@@ -54,10 +51,11 @@ export default function App() {
   // โหลดค่าเริ่มต้นของหน้าจัดครูสอนแทนจากที่บันทึกไว้ล่าสุด (หรือค่าเริ่มต้นครู 102)
   const initialDate = getInitialWeekdayDate();
   const initialSavedPlanner = loadLocalPlannerState();
-  const initialTeacherIds =
+  const rawInitialTeacherIds =
     initialSavedPlanner && initialSavedPlanner.absentTeacherIds.length > 0
-      ? initialSavedPlanner.absentTeacherIds
+      ? initialSavedPlanner.absentTeacherIds.filter((id) => !isTeacherExemptFromNeedingSubstitute(id))
       : ["102"];
+  const initialTeacherIds = rawInitialTeacherIds.length > 0 ? rawInitialTeacherIds : ["102"];
   const initialSelectedDate = initialSavedPlanner?.selectedDate || initialDate;
   const initialReason = initialSavedPlanner?.reason || "ไปราชการ";
   const initialStudentTeacherName = initialSavedPlanner?.studentTeacherName || "";
@@ -90,14 +88,6 @@ export default function App() {
   const [focusTimetableTeacherId, setFocusTimetableTeacherId] = useState<number | null>(
     null
   );
-
-  // ติดตามการแก้ไขในเครื่องนี้เพื่อป้องกัน Snapshot สะท้อนกลับทับระหว่างพิมพ์
-  const lastLocalWriteIdRef = useRef<string>("");
-  const lastLocalEditTimeRef = useRef<number>(0);
-  const savedRecordsRef = useRef<SavedSubstituteRecord[]>(savedRecords);
-  useEffect(() => {
-    savedRecordsRef.current = savedRecords;
-  }, [savedRecords]);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -164,55 +154,9 @@ export default function App() {
       (snapshot) => {
         const cloudRecords: SavedSubstituteRecord[] = [];
         snapshot.forEach((docSnap) => {
+          if (docSnap.id === LIVE_WORKSPACE_DOC_ID) return;
           const d = docSnap.data();
           const decoded = decodeAssignments(String(d.assignmentsJson || ""));
-
-          if (docSnap.id === LIVE_WORKSPACE_DOC_ID) {
-            if (docSnap.metadata.hasPendingWrites) return;
-            if (
-              decoded.clientWriteId &&
-              decoded.clientWriteId === lastLocalWriteIdRef.current
-            ) {
-              return;
-            }
-            if (Date.now() - lastLocalEditTimeRef.current < 1500) {
-              return;
-            }
-
-            const remoteIds =
-              decoded.absentTeacherIds && decoded.absentTeacherIds.length > 0
-                ? decoded.absentTeacherIds
-                : [String(d.absentTeacherId || 102)];
-            const remoteDate = String(d.selectedDate || initialDate);
-            const remoteReason = String(d.reason || "ไปราชการ");
-            const remoteStudentName = String(d.studentTeacherName || "");
-            const remoteSupervision = Boolean(d.includeSupervision);
-            const remoteAssignments =
-              Object.keys(decoded.assignments).length > 0
-                ? decoded.assignments
-                : autoAssignCombinedSubstitutes(
-                    remoteIds,
-                    remoteDate,
-                    remoteSupervision
-                  );
-
-            setAbsentTeacherIds(remoteIds);
-            setSelectedDate(remoteDate);
-            setReason(remoteReason);
-            setStudentTeacherName(remoteStudentName);
-            setIncludeSupervision(remoteSupervision);
-            setAssignments(remoteAssignments);
-            saveLocalPlannerState({
-              absentTeacherIds: remoteIds,
-              selectedDate: remoteDate,
-              reason: remoteReason,
-              studentTeacherName: remoteStudentName,
-              includeSupervision: remoteSupervision,
-              assignments: remoteAssignments,
-              clientWriteId: decoded.clientWriteId,
-            });
-            return;
-          }
 
           cloudRecords.push({
             recordId: String(d.recordId || docSnap.id),
@@ -243,61 +187,9 @@ export default function App() {
     };
   }, []);
 
-  // ฟังก์ชันบันทึกการเปลี่ยนแปลงของหน้าจัดสอนแทนอัตโนมัติ (ทั้งในเครื่องและ Cloud Firestore กลาง)
-  const triggerPlannerAutoSave = (nextState: LivePlannerWorkspaceState) => {
-    const writeId = `${CLIENT_SESSION_ID}_${Date.now()}`;
-    lastLocalWriteIdRef.current = writeId;
-    lastLocalEditTimeRef.current = Date.now();
-
-    const stateWithId: LivePlannerWorkspaceState = {
-      ...nextState,
-      clientWriteId: writeId,
-    };
-    saveLocalPlannerState(stateWithId);
-    setAutoSaveState("saving");
-
-    const combinedHeader = buildCombinedTeacherHeader(nextState.absentTeacherIds);
-    const activeClasses = getCombinedTeacherClasses(
-      nextState.absentTeacherIds,
-      nextState.selectedDate,
-      nextState.includeSupervision
-    );
-
-    const savePromises: Promise<unknown>[] = [
-      saveLiveWorkspaceToCloud(stateWithId, combinedHeader),
-    ];
-
-    if (combinedHeader && activeClasses.length > 0) {
-      const idsPart = nextState.absentTeacherIds.join("-");
-      const recordId = `rec_${idsPart}_${nextState.selectedDate.replace(/[^0-9]/g, "")}`;
-      savePromises.push(
-        upsertSubstituteRecordInDatabase(
-          {
-            recordId,
-            absentTeacherId: combinedHeader.id,
-            absentTeacherIds: [...nextState.absentTeacherIds],
-            absentTeacherName: combinedHeader.n,
-            absentTeacherGroup: combinedHeader.pdfGroup,
-            selectedDate: nextState.selectedDate,
-            reason: nextState.reason,
-            studentTeacherName: nextState.studentTeacherName,
-            includeSupervision: nextState.includeSupervision,
-            assignments: nextState.assignments,
-          },
-          savedRecordsRef.current
-        ).then((updatedRecords) => {
-          setSavedRecords(updatedRecords);
-        })
-      );
-    }
-
-    Promise.all(savePromises)
-      .then(() => {
-        setAutoSaveState("saved");
-      })
-      .catch(() => {
-        setAutoSaveState("saved");
-      });
+  // บันทึกฉบับร่างในเครื่อง (localStorage) เพื่อป้องกันข้อมูลสูญหายเมื่อรีเฟรชหน้าจอ โดยไม่บันทึกลงฐานข้อมูลอัตโนมัติ
+  const saveLocalDraft = (nextState: LivePlannerWorkspaceState) => {
+    saveLocalPlannerState(nextState);
   };
 
   // เปลี่ยนครูหลักจาก #ta
@@ -307,6 +199,7 @@ export default function App() {
       setAssignments({});
       return;
     }
+    if (isTeacherExemptFromNeedingSubstitute(newId)) return;
     const rest = absentTeacherIds.slice(1).filter((id) => id !== newId);
     const nextIds = [newId, ...rest];
     const nextAssignments = autoAssignCombinedSubstitutes(
@@ -316,7 +209,7 @@ export default function App() {
     );
     setAbsentTeacherIds(nextIds);
     setAssignments(nextAssignments);
-    triggerPlannerAutoSave({
+    saveLocalDraft({
       absentTeacherIds: nextIds,
       selectedDate,
       reason,
@@ -330,11 +223,14 @@ export default function App() {
   const handleAddAbsentTeacher = (preferredTeacherId?: string) => {
     const usedIds = new Set(absentTeacherIds);
     let targetId = preferredTeacherId || "";
+    if (isTeacherExemptFromNeedingSubstitute(targetId)) return;
     if (!targetId || usedIds.has(targetId)) {
-      const nextAvailable = teachers.find((t) => !usedIds.has(String(t.id)));
+      const nextAvailable = teachers.find(
+        (t) => !usedIds.has(String(t.id)) && !isTeacherExemptFromNeedingSubstitute(t)
+      );
       targetId = nextAvailable ? String(nextAvailable.id) : "";
     }
-    if (!targetId) return;
+    if (!targetId || isTeacherExemptFromNeedingSubstitute(targetId)) return;
 
     const nextIds = [...absentTeacherIds, targetId];
     const nextAssignments = autoAssignCombinedSubstitutes(
@@ -344,7 +240,7 @@ export default function App() {
     );
     setAbsentTeacherIds(nextIds);
     setAssignments(nextAssignments);
-    triggerPlannerAutoSave({
+    saveLocalDraft({
       absentTeacherIds: nextIds,
       selectedDate,
       reason,
@@ -365,7 +261,7 @@ export default function App() {
     );
     setAbsentTeacherIds(nextIds);
     setAssignments(nextAssignments);
-    triggerPlannerAutoSave({
+    saveLocalDraft({
       absentTeacherIds: nextIds,
       selectedDate,
       reason,
@@ -384,7 +280,7 @@ export default function App() {
     );
     setSelectedDate(newDate);
     setAssignments(nextAssignments);
-    triggerPlannerAutoSave({
+    saveLocalDraft({
       absentTeacherIds,
       selectedDate: newDate,
       reason,
@@ -397,7 +293,7 @@ export default function App() {
   // เปลี่ยนเหตุผล / ภารกิจ
   const handleReasonChange = (newReason: string) => {
     setReason(newReason);
-    triggerPlannerAutoSave({
+    saveLocalDraft({
       absentTeacherIds,
       selectedDate,
       reason: newReason,
@@ -410,7 +306,7 @@ export default function App() {
   // เปลี่ยนชื่อนักศึกษาฝึกสอนเพิ่มเติม
   const handleStudentTeacherNameChange = (newName: string) => {
     setStudentTeacherName(newName);
-    triggerPlannerAutoSave({
+    saveLocalDraft({
       absentTeacherIds,
       selectedDate,
       reason,
@@ -429,7 +325,7 @@ export default function App() {
     );
     setIncludeSupervision(inc);
     setAssignments(nextAssignments);
-    triggerPlannerAutoSave({
+    saveLocalDraft({
       absentTeacherIds,
       selectedDate,
       reason,
@@ -447,7 +343,7 @@ export default function App() {
       includeSupervision
     );
     setAssignments(nextAssignments);
-    triggerPlannerAutoSave({
+    saveLocalDraft({
       absentTeacherIds,
       selectedDate,
       reason,
@@ -471,7 +367,7 @@ export default function App() {
       next[String(periodIndex)] = value;
     }
     setAssignments(next);
-    triggerPlannerAutoSave({
+    saveLocalDraft({
       absentTeacherIds,
       selectedDate,
       reason,
@@ -497,7 +393,7 @@ export default function App() {
     setAbsentTeacherIds(nextIds);
     setAssignments(nextAssignments);
     setActiveTab("planner");
-    triggerPlannerAutoSave({
+    saveLocalDraft({
       absentTeacherIds: nextIds,
       selectedDate,
       reason,
@@ -507,9 +403,8 @@ export default function App() {
     });
   };
 
-  // CRUD: เพิ่ม / แก้ไขครู (บันทึกลงฐานข้อมูลกลางอัตโนมัติทันที)
+  // CRUD: เพิ่ม / แก้ไขครู (บันทึกลงฐานข้อมูลกลาง)
   const handleSaveTeacher = async (teacherRecord: TeacherRecord) => {
-    setAutoSaveState("saving");
     const updated = await upsertTeacherInDatabase(teacherRecord, teachers);
     setTeachers(updated);
     const nextAssignments = autoAssignCombinedSubstitutes(
@@ -518,12 +413,10 @@ export default function App() {
       includeSupervision
     );
     setAssignments(nextAssignments);
-    setAutoSaveState("saved");
   };
 
-  // CRUD: ลบครู (ลบจากฐานข้อมูลกลางอัตโนมัติทันที)
+  // CRUD: ลบครู (ลบจากฐานข้อมูลกลาง)
   const handleDeleteTeacher = async (teacherId: number) => {
-    setAutoSaveState("saving");
     const updated = await removeTeacherFromDatabase(teacherId, teachers);
     setTeachers(updated);
     const remainingIds = absentTeacherIds.filter((id) => id !== String(teacherId));
@@ -540,12 +433,10 @@ export default function App() {
     );
     setAbsentTeacherIds(nextIds);
     setAssignments(nextAssignments);
-    setAutoSaveState("saved");
   };
 
   // CRUD: กู้คืนข้อมูลเริ่มต้นจาก PDF ทั้ง 31 ท่าน
   const handleResetDefaultTeachers = async () => {
-    setAutoSaveState("saving");
     const updated = await syncAllTeachersToCloud(INITIAL_TEACHERS);
     setTeachers(updated);
     const nextAssignments = autoAssignCombinedSubstitutes(
@@ -554,14 +445,12 @@ export default function App() {
       includeSupervision
     );
     setAssignments(nextAssignments);
-    setAutoSaveState("saved");
   };
 
-  // CRUD: บันทึกใบสอนแทนปัจจุบันลงฐานข้อมูลกลาง
+  // CRUD: บันทึกใบสอนแทนปัจจุบันลงฐานข้อมูลกลาง (เมื่อผู้ใช้กดปุ่มบันทึกประวัติ)
   const handleSaveCurrentSubstituteRecord = async () => {
     const combinedHeader = buildCombinedTeacherHeader(absentTeacherIds);
     if (!combinedHeader) return;
-    setAutoSaveState("saving");
     const idsPart = absentTeacherIds.join("-");
     const recordId = `rec_${idsPart}_${selectedDate.replace(/[^0-9]/g, "")}`;
     const updatedRecords = await upsertSubstituteRecordInDatabase(
@@ -580,7 +469,6 @@ export default function App() {
       savedRecords
     );
     setSavedRecords(updatedRecords);
-    setAutoSaveState("saved");
   };
 
   // CRUD: โหลดใบสอนแทนที่บันทึกไว้กลับมาแก้ไข/พิมพ์
@@ -597,7 +485,7 @@ export default function App() {
     setIncludeSupervision(record.includeSupervision);
     setAssignments(loadedAssignments);
     setActiveTab("planner");
-    triggerPlannerAutoSave({
+    saveLocalDraft({
       absentTeacherIds: loadedIds,
       selectedDate: record.selectedDate,
       reason: record.reason,
@@ -609,10 +497,8 @@ export default function App() {
 
   // CRUD: ลบใบสอนแทนที่บันทึกไว้
   const handleDeleteSubstituteRecord = async (recordId: string) => {
-    setAutoSaveState("saving");
     const updated = await removeSubstituteRecordFromDatabase(recordId, savedRecords);
     setSavedRecords(updated);
-    setAutoSaveState("saved");
   };
 
   return (
@@ -653,7 +539,6 @@ export default function App() {
             onLoadSavedRecord={handleLoadSubstituteRecord}
             onDeleteSavedRecord={handleDeleteSubstituteRecord}
             onOpenDatabaseTab={() => setActiveTab("database")}
-            autoSaveState={autoSaveState}
           />
         )}
 

@@ -26,6 +26,8 @@ import {
   formatShortThaiDate,
   formatThaiMonthYearHeader,
   isSchoolAdministrator,
+  isTeacherExemptFromNeedingSubstitute,
+  isExcludedFromSubstituting,
 } from "./scheduler";
 
 test("all 31 teachers (27 regular + 4 student teachers) from the 16-page PDF are loaded with 5x7 schedules", () => {
@@ -246,7 +248,14 @@ test("Image 1 10-column record form formatters produce exact Thai month/year, sh
   assert.equal(formatClassLevelLabel("4/1"), "ม.4/1");
   assert.equal(formatClassLevelLabel("ม.2/1"), "ม.2/1");
   assert.equal(getSubjectNameFromCourse("ท21101", "ภาษาไทย"), "ภาษาไทย");
-  assert.equal(getSubjectNameFromCourse("ค32102", "คณิตศาสตร์"), "คณิตศาสตร์");
+  assert.equal(getSubjectNameFromCourse("ค32102", "คณิตศาสตร์"), "คณิตศาสตร์พื้นฐาน");
+  assert.equal(getSubjectNameFromCourse("ค32202", "คณิตศาสตร์"), "คณิตศาสตร์เพิ่มเติม");
+  assert.equal(getSubjectNameFromCourse("ว31222", "เคมี"), "เคมี");
+  assert.equal(getSubjectNameFromCourse("ว32204", "ฟิสิกส์"), "ฟิสิกส์");
+  assert.equal(getSubjectNameFromCourse("ว31242", "ชีววิทยา"), "ชีววิทยา");
+  assert.equal(getSubjectNameFromCourse("ว32102", "วิทยาศาสตร์"), "วิทยาศาสตร์กายภาพ");
+  assert.equal(getSubjectNameFromCourse("ว21102", "วิทยาศาสตร์"), "วิทยาศาสตร์พื้นฐาน");
+  assert.equal(getSubjectNameFromCourse("ว33282", "วิทยาศาสตร์"), "วิทยาการคำนวณ");
   assert.equal(formatCleanSubstituteName("ครูสุภาวรรณ ปวยทอง (นศ.ฝึกสอน)"), "นางสาวสุภาวรรณ ปวยทอง");
   assert.equal(formatCleanSubstituteName("นายธีระเทพ มัครมย์ (นศ.ฝึกสอน)"), "นายธีระเทพ มัครมย์");
 });
@@ -302,6 +311,105 @@ test("School administrators (100 ผอ., 101 รอง ผอ., 202 ผู้�
       assert.notEqual(val, "t202");
     }
   }
+});
+
+test("Teacher 302 (ครูรณสิทธิ์ ประดับศรี) is strictly exempt from needing substitutes and excluded from going to substitute", () => {
+  const t302 = TEACHERS.find((t) => t.id === 302);
+  assert.ok(t302);
+  assert.equal(t302.n, "ครูรณสิทธิ์ ประดับศรี");
+  assert.equal(t302.pdfGroup, "ชีววิทยา");
+
+  // 1. isTeacherExemptFromNeedingSubstitute
+  assert.equal(isTeacherExemptFromNeedingSubstitute(302), true);
+  assert.equal(isTeacherExemptFromNeedingSubstitute("302"), true);
+  assert.equal(isTeacherExemptFromNeedingSubstitute(t302), true);
+  assert.equal(isTeacherExemptFromNeedingSubstitute(102), false);
+
+  // 2. isExcludedFromSubstituting
+  assert.equal(isExcludedFromSubstituting(t302), true);
+
+  // 3. getTeacherClasses for 302 must always return []
+  const monClasses = getTeacherClasses(302, "2026-11-02");
+  assert.deepEqual(monClasses, []);
+  const wedClasses = getTeacherClasses(302, "2026-11-04");
+  assert.deepEqual(wedClasses, []);
+
+  // 4. getCombinedTeacherClasses with 302 filters 302 out
+  const combined = getCombinedTeacherClasses([302, 102], "2026-11-03");
+  for (const slot of combined) {
+    assert.notEqual(slot.absentTeacherId, 302);
+  }
+
+  // 5. autoAssignSubstitutes for 302 returns empty
+  const asg302 = autoAssignSubstitutes(302, "2026-11-02");
+  assert.deepEqual(asg302, {});
+
+  // 6. Across all 5 weekdays and all 7 periods, 302 is NEVER in getCandidateTeachers
+  const testDates = [
+    "2026-11-02",
+    "2026-11-03",
+    "2026-11-04",
+    "2026-11-05",
+    "2026-11-06",
+  ];
+  for (const date of testDates) {
+    for (let p = 0; p < 7; p++) {
+      const candidates = getCandidateTeachers(102, date, p);
+      const candIds = candidates.map((c) => c.id);
+      assert.equal(
+        candIds.includes(302),
+        false,
+        `Teacher 302 must not be a substitute candidate on ${date} period ${p}`
+      );
+    }
+  }
+
+  // 7. autoAssignCombinedSubstitutes never assigns 302 to any class
+  for (const date of testDates) {
+    const asg = autoAssignCombinedSubstitutes([102, 103], date);
+    for (const val of Object.values(asg)) {
+      assert.notEqual(val, "t302");
+    }
+  }
+});
+
+test("chunkSubstituteRows keeps <= 7 rows on a single page and cleanly paginates > 7 rows into multiple pages without cramming", async () => {
+  const { chunkSubstituteRows } = await import("./exportDoc");
+
+  const makeFakeRow = (i: number): any => ({
+    p: i + 1,
+    tm: "08:30-09:20",
+    code: `ท2110${i + 1}`,
+    cls: "1/1",
+    room: "138",
+    n: "ครูทดสอบ",
+    g: "ภาษาไทย",
+  });
+
+  // 1 to 11 rows -> exactly 1 page (fits comfortably on A4 landscape with signatures)
+  const rows4 = [makeFakeRow(0), makeFakeRow(1), makeFakeRow(2), makeFakeRow(3)];
+  const pages4 = chunkSubstituteRows(rows4);
+  assert.equal(pages4.length, 1);
+  assert.equal(pages4[0].length, 4);
+
+  const rows11 = Array.from({ length: 11 }, (_, i) => makeFakeRow(i));
+  const pages11 = chunkSubstituteRows(rows11);
+  assert.equal(pages11.length, 1);
+  assert.equal(pages11[0].length, 11);
+
+  // 15 rows (user's Thursday test case) -> splits into 2 pages: page 1 has 11 rows, page 2 has 4 rows + signatures
+  const rows15 = Array.from({ length: 15 }, (_, i) => makeFakeRow(i));
+  const pages15 = chunkSubstituteRows(rows15);
+  assert.equal(pages15.length, 2);
+  assert.equal(pages15[0].length, 11);
+  assert.equal(pages15[1].length, 4);
+
+  // 18 rows -> 2 pages: page 1 fills 14 rows, page 2 has 4 rows + signatures
+  const rows18 = Array.from({ length: 18 }, (_, i) => makeFakeRow(i));
+  const pages18 = chunkSubstituteRows(rows18);
+  assert.equal(pages18.length, 2);
+  assert.equal(pages18[0].length, 14);
+  assert.equal(pages18[1].length, 4);
 });
 
 

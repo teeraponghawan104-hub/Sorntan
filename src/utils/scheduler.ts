@@ -162,6 +162,9 @@ export function getTeacherClasses(
   dateStr: string,
   includeSupervision = false
 ): ClassSlot[] {
+  // ครู 302 ครูรณสิทธิ์ ประดับศรี ไม่ต้องจัดสอนแทนให้ครูท่านนี้ตามนโยบายโรงเรียน
+  if (isTeacherExemptFromNeedingSubstitute(teacherId)) return [];
+
   const teacher = getTeacherById(teacherId);
   const dayIdx = getDayIndex(dateStr);
   if (!teacher || dayIdx < 0 || !teacher.d) return [];
@@ -193,6 +196,7 @@ export function getTeacherClasses(
 /**
  * ดึงรายการคาบสอนรวมของครูที่ลาทุกคนในวันเดียวกัน เพื่อนำมาเรียงรวมในตารางเดียวกัน
  * เรียงตามลำดับคาบที่ 1..7 แล้วตามลำดับครูที่เลือก
+ * โดยยกเว้นครู 302 (ครูรณสิทธิ์ ประดับศรี) ที่ไม่ต้องจัดสอนแทนให้
  */
 export function getCombinedTeacherClasses(
   teacherIds: (string | number)[],
@@ -203,6 +207,7 @@ export function getCombinedTeacherClasses(
   const validTeachers: TeacherRecord[] = [];
 
   for (const rawId of teacherIds) {
+    if (isTeacherExemptFromNeedingSubstitute(rawId)) continue;
     const t = getTeacherById(rawId);
     if (t && !seenTeachers.has(t.id)) {
       seenTeachers.add(t.id);
@@ -246,6 +251,35 @@ export interface AbsentTeacherEntry {
 }
 
 /**
+ * ตรวจสอบว่าเป็นครูที่ได้รับการยกเว้นไม่ต้องจัดสอนแทนให้หรือไม่
+ * ตามความต้องการของโรงเรียน: 302 ครูรณสิทธิ์ ประดับศรี (ชีววิทยา · ห้องชีวะ) ไม่ต้องจัดสอนแทนให้ครูท่านนี้
+ */
+export function isTeacherExemptFromNeedingSubstitute(
+  teacherOrId: TeacherRecord | number | string | undefined
+): boolean {
+  if (!teacherOrId) return false;
+  if (typeof teacherOrId === "object") {
+    if (teacherOrId.id === 302) return true;
+    if (teacherOrId.n && teacherOrId.n.includes("รณสิทธิ์ ประดับศรี")) return true;
+    return false;
+  }
+  const num = Number(teacherOrId);
+  return num === 302;
+}
+
+/**
+ * ตรวจสอบว่าเป็นครูที่ยกเว้นไม่ให้ไปสอนแทนผู้อื่นเด็ดขาดหรือไม่
+ * 1) ผู้บริหารสถานศึกษา (100 ผอ., 101 รอง ผอ., 202 ผู้ช่วย ผอ., ฝ่ายบริหาร) ไม่จัดสอนแทนเด็ดขาด
+ * 2) 302 ครูรณสิทธิ์ ประดับศรี (ชีววิทยา · ห้องชีวะ) ไม่ต้องให้ไปสอนแทนเด็ดขาด
+ */
+export function isExcludedFromSubstituting(teacher: TeacherRecord | undefined): boolean {
+  if (!teacher) return false;
+  if (isSchoolAdministrator(teacher)) return true;
+  if (teacher.id === 302 || teacher.n?.includes("รณสิทธิ์ ประดับศรี")) return true;
+  return false;
+}
+
+/**
  * ตรวจสอบว่าเป็นผู้บริหารสถานศึกษาหรือไม่ (ผู้อำนวยการ, รองผู้อำนวยการ, ผู้ช่วยผู้อำนวยการ, ฝ่ายบริหาร)
  * เพื่อป้องกันไม่ให้ระบบนำผู้บริหารมาจัดสอนแทนเด็ดขาดตามนโยบายโรงเรียน
  */
@@ -272,7 +306,8 @@ export function isSchoolAdministrator(teacher: TeacherRecord | undefined): boole
  * 2) นักศึกษาฝึกสอนที่ว่างในคาบนั้น (isStudentTeacher) โดยเรียงกลุ่มสาระเดียวกันขึ้นก่อน
  * 3) ครูประจำการต่างกลุ่มสาระ (!isStudentTeacher && g !== absent.g)
  *
- * โดยตัดรายชื่อครูที่ลาในวันเดียวกัน (excludedTeacherIds) และผู้บริหารสถานศึกษาออกเด็ดขาด
+ * โดยตัดรายชื่อครูที่ลาในวันเดียวกัน (excludedTeacherIds), ผู้บริหารสถานศึกษา
+ * และครู 302 (ครูรณสิทธิ์ ประดับศรี) ออกเด็ดขาด
  */
 export function getCandidateTeachers(
   absentTeacherId: string | number,
@@ -292,8 +327,8 @@ export function getCandidateTeachers(
 
   return TEACHERS.filter((t) => {
     if (excludedSet.has(t.id)) return false;
-    // ผู้บริหารโรงเรียน (100 ผอ., 101 รอง ผอ., 202 ผู้ช่วย ผอ., ฝ่ายบริหาร) ไม่จัดมาสอนแทนเด็ดขาด
-    if (isSchoolAdministrator(t)) return false;
+    // ผู้บริหารโรงเรียน และ ครู 302 (ครูรณสิทธิ์ ประดับศรี) ไม่ให้ไปสอนแทนเด็ดขาด
+    if (isExcludedFromSubstituting(t)) return false;
     const cell = t.d?.[dayIdx]?.[periodIndex] || "";
     // ต้องไม่มีคาบสอน ไม่ติดประชุม (*) ไม่ติดนิเทศสอน หรือกิจกรรมในคาบนั้น
     return cell.trim() === "";
@@ -326,6 +361,8 @@ export function autoAssignSubstitutes(
   sharedAssignedCount?: Record<number, number>,
   usedInPeriod?: Record<number, Set<number>>
 ): Record<number, string> {
+  if (isTeacherExemptFromNeedingSubstitute(absentTeacherId)) return {};
+
   const absentTeacher = getTeacherById(absentTeacherId);
   const classes = getTeacherClasses(absentTeacherId, dateStr, includeSupervision);
   const assignments: Record<number, string> = {};
@@ -429,7 +466,7 @@ export function autoAssignCombinedSubstitutes(
     new Set(
       teacherIds
         .map((id) => Number(id))
-        .filter((id) => !Number.isNaN(id) && id > 0)
+        .filter((id) => !Number.isNaN(id) && id > 0 && !isTeacherExemptFromNeedingSubstitute(id))
     )
   );
   const combinedSlots = getCombinedTeacherClasses(allAbsentIds, dateStr, includeSupervision);
@@ -637,36 +674,287 @@ export function formatClassLevelLabel(cls: string): string {
 }
 
 /**
- * แปลงรหัสวิชาเป็นชื่อวิชาสำหรับคอลัมน์ "วิชา" เช่น ท21101 -> ภาษาไทย
+ * แผนที่รหัสวิชาเฉพาะเจาะจง -> ชื่อวิชาที่สอนจริง (ไม่ใช่ชื่อกลุ่มสาระ)
+ * เช่น เคมี, ชีววิทยา, ฟิสิกส์, วิทยาศาสตร์กายภาพ, วิทยาศาสตร์ชีวภาพ, วิทยาศาสตร์พื้นฐาน, วิทยาการคำนวณ, คณิตศาสตร์เพิ่มเติม ฯลฯ
  */
-export function getSubjectNameFromCourse(code: string, fallbackGroup?: string): string {
+export const KNOWN_COURSE_SUBJECTS: Record<string, string> = {
+  // ฟิสิกส์
+  "ว31202": "ฟิสิกส์",
+  "ว32204": "ฟิสิกส์",
+  "ว33206": "ฟิสิกส์",
+  // เคมี
+  "ว31222": "เคมี",
+  "ว32224": "เคมี",
+  "ว33226": "เคมี",
+  // ชีววิทยา
+  "ว31242": "ชีววิทยา",
+  "ว32244": "ชีววิทยา",
+  "ว33246": "ชีววิทยา",
+  // วิทยาศาสตร์ ม.ปลาย (กายภาพ / ชีวภาพ)
+  "ว32102": "วิทยาศาสตร์กายภาพ",
+  "ว31102": "วิทยาศาสตร์ชีวภาพ",
+  "ว31103": "วิทยาศาสตร์กายภาพ",
+  "ว32103": "วิทยาศาสตร์กายภาพ",
+  // วิทยาศาสตร์ ม.ต้น (วิทยาศาสตร์พื้นฐาน)
+  "ว21101": "วิทยาศาสตร์พื้นฐาน",
+  "ว21102": "วิทยาศาสตร์พื้นฐาน",
+  "ว22101": "วิทยาศาสตร์พื้นฐาน",
+  "ว22102": "วิทยาศาสตร์พื้นฐาน",
+  "ว23101": "วิทยาศาสตร์พื้นฐาน",
+  "ว23102": "วิทยาศาสตร์พื้นฐาน",
+  // คอมพิวเตอร์ / วิทยาการคำนวณ / เทคโนโลยี
+  "ว21104": "วิทยาการคำนวณ",
+  "ว22104": "วิทยาการคำนวณ",
+  "ว23104": "วิทยาการคำนวณ",
+  "ว31104": "วิทยาการคำนวณ",
+  "ว32104": "วิทยาการคำนวณ",
+  "ว33282": "วิทยาการคำนวณ",
+  "ว30273": "มัลติมีเดีย",
+  "ว30274": "อินโฟกราฟิก",
+  "ว30277": "คอมพิวเตอร์",
+  "ว30278": "เขียนโปรแกรม",
+  "ว30281": "มัลติมีเดีย",
+  "ว30282": "การนำเสนอ",
+  // คณิตศาสตร์พื้นฐาน
+  "ค21101": "คณิตศาสตร์พื้นฐาน",
+  "ค21102": "คณิตศาสตร์พื้นฐาน",
+  "ค22101": "คณิตศาสตร์พื้นฐาน",
+  "ค22102": "คณิตศาสตร์พื้นฐาน",
+  "ค23101": "คณิตศาสตร์พื้นฐาน",
+  "ค23102": "คณิตศาสตร์พื้นฐาน",
+  "ค31101": "คณิตศาสตร์พื้นฐาน",
+  "ค31102": "คณิตศาสตร์พื้นฐาน",
+  "ค32101": "คณิตศาสตร์พื้นฐาน",
+  "ค32102": "คณิตศาสตร์พื้นฐาน",
+  "ค33101": "คณิตศาสตร์พื้นฐาน",
+  "ค33102": "คณิตศาสตร์พื้นฐาน",
+  // คณิตศาสตร์เพิ่มเติม
+  "ค21201": "คณิตศาสตร์เพิ่มเติม",
+  "ค21202": "คณิตศาสตร์เพิ่มเติม",
+  "ค22201": "คณิตศาสตร์เพิ่มเติม",
+  "ค22202": "คณิตศาสตร์เพิ่มเติม",
+  "ค23201": "คณิตศาสตร์เพิ่มเติม",
+  "ค23202": "คณิตศาสตร์เพิ่มเติม",
+  "ค31201": "คณิตศาสตร์เพิ่มเติม",
+  "ค31202": "คณิตศาสตร์เพิ่มเติม",
+  "ค32201": "คณิตศาสตร์เพิ่มเติม",
+  "ค32202": "คณิตศาสตร์เพิ่มเติม",
+  "ค32202-พต": "คณิตศาสตร์เพิ่มเติม",
+  "ค33201": "คณิตศาสตร์เพิ่มเติม",
+  "ค33202": "คณิตศาสตร์เพิ่มเติม",
+  "ค33204": "คณิตศาสตร์เพิ่มเติม",
+  // สังคมศึกษา & ประวัติศาสตร์ & ศาสนา & เศรษฐศาสตร์
+  "ส21101": "สังคมศึกษา",
+  "ส21102": "สังคมศึกษา",
+  "ส22101": "สังคมศึกษา",
+  "ส22103": "สังคมศึกษา",
+  "ส23101": "สังคมศึกษา",
+  "ส23102": "สังคมศึกษา",
+  "ส23103": "สังคมศึกษา",
+  "ส31101": "สังคมศึกษา",
+  "ส32101": "สังคมศึกษา",
+  "ส33101": "สังคมศึกษา",
+  "ส21104": "ประวัติศาสตร์",
+  "ส22104": "ประวัติศาสตร์",
+  "ส23104": "ประวัติศาสตร์",
+  "ส31104": "ประวัติศาสตร์",
+  "ส31103": "เศรษฐศาสตร์",
+  "ส33102": "เศรษฐศาสตร์",
+  "ส32103": "พระพุทธศาสนา",
+  "ส32104": "หน้าที่พลเมือง",
+  "ส30241": "สังคมศึกษาเพิ่มเติม",
+  // ภาษาไทย
+  "ท21101": "ภาษาไทย",
+  "ท21102": "ภาษาไทย",
+  "ท22101": "ภาษาไทย",
+  "ท22102": "ภาษาไทย",
+  "ท23101": "ภาษาไทย",
+  "ท23102": "ภาษาไทย",
+  "ท31101": "ภาษาไทย",
+  "ท31102": "ภาษาไทย",
+  "ท32101": "ภาษาไทย",
+  "ท32102": "ภาษาไทย",
+  "ท33101": "ภาษาไทย",
+  "ท33102": "ภาษาไทย",
+  // ภาษาต่างประเทศ
+  "อ21101": "ภาษาอังกฤษ",
+  "อ21102": "ภาษาอังกฤษ",
+  "อ22101": "ภาษาอังกฤษ",
+  "อ22102": "ภาษาอังกฤษ",
+  "อ23101": "ภาษาอังกฤษ",
+  "อ23102": "ภาษาอังกฤษ",
+  "อ31101": "ภาษาอังกฤษ",
+  "อ31102": "ภาษาอังกฤษ",
+  "อ32101": "ภาษาอังกฤษ",
+  "อ32102": "ภาษาอังกฤษ",
+  "อ33101": "ภาษาอังกฤษ",
+  "อ33102": "ภาษาอังกฤษ",
+  "อ31204": "ภาษาอังกฤษเพิ่มเติม",
+  "อ32204": "ภาษาอังกฤษเพิ่มเติม",
+  "จ21202": "ภาษาจีน",
+  "จ22202": "ภาษาจีน",
+  "จ23202": "ภาษาจีน",
+  "จ31202": "ภาษาจีน",
+  "จ32202": "ภาษาจีน",
+  "จ32203": "ภาษาจีน",
+  "จ33202": "ภาษาจีน",
+  // สุขศึกษา & พลศึกษา
+  "พ21103": "สุขศึกษา",
+  "พ22103": "สุขศึกษา",
+  "พ23103": "สุขศึกษา",
+  "พ21104": "ฟุตบอล",
+  "พ22104": "กระบี่กระบอง",
+  "พ23104": "พลศึกษาเพิ่มเติม",
+  "พ31202": "แบดมินตัน",
+  "พ32202": "บาสเกตบอล",
+  "พ31102": "สุขศึกษาและพลศึกษา",
+  "พ32102": "สุขศึกษาและพลศึกษา",
+  "พ33102": "สุขศึกษาและพลศึกษา",
+  "พ33202": "พลศึกษา",
+  // ศิลปะ
+  "ศ21102": "ดนตรี-นาฏศิลป์",
+  "ศ22102": "ศิลปะ-ดนตรี",
+  "ศ23102": "ทัศนศิลป์",
+  "ศ23103": "ศิลปะ-ดนตรี",
+  "ศ31102": "ดนตรี-นาฏศิลป์",
+  "ศ32102": "ศิลปะ-ดนตรี",
+  "ศ33102": "ศิลปะ-ดนตรี",
+  // การงานอาชีพ
+  "ง20213": "การงานอาชีพ",
+  "ง21102": "การงานอาชีพ",
+  "ง22102": "การงานอาชีพ",
+  "ง23102": "การงานอาชีพ",
+  "ง23202": "การงานอาชีพ",
+  "ง30202": "การงานอาชีพ",
+  "ง30207": "เบเกอรี่",
+  "ง30208": "ขนมไทย",
+  "ง30224": "เทคโนโลยีการเกษตร",
+  "ง30242": "ภาษีเบื้องต้น",
+  "ง31102": "การงานอาชีพ",
+  "ง32102": "การงานอาชีพ",
+  "ง33102": "การงานอาชีพ",
+  // IS
+  "I20202": "การศึกษาค้นคว้าอิสระ (IS)",
+  "I30201": "การศึกษาค้นคว้าอิสระ (IS)",
+  "IS-2": "การศึกษาค้นคว้าอิสระ (IS)",
+  "IS-11": "การศึกษาค้นคว้าอิสระ (IS)",
+};
+
+/**
+ * แปลงรหัสวิชาเป็นชื่อวิชาเฉพาะที่สอนจริง (ไม่ใช่ชื่อกลุ่มสาระ)
+ * เช่น เคมี, ฟิสิกส์, ชีววิทยา, วิทยาศาสตร์พื้นฐาน, วิทยาศาสตร์กายภาพ, คณิตศาสตร์พื้นฐาน, คณิตศาสตร์เพิ่มเติม
+ */
+export function getSubjectNameFromCourse(
+  code: string,
+  fallbackGroup?: string,
+  teacherSpecialtyOrId?: string | number
+): string {
   const trimmed = String(code || "").trim();
   if (!trimmed || trimmed === "-") return fallbackGroup || "-";
-  if (trimmed.startsWith("นิเทศสอน")) return "นิเทศสอน";
-  const firstChar = trimmed.charAt(0);
-  switch (firstChar) {
-    case "ท":
-      return "ภาษาไทย";
-    case "ค":
-      return "คณิตศาสตร์";
-    case "ว":
-      return "วิทยาศาสตร์";
-    case "ส":
-      return "สังคมศึกษา";
-    case "พ":
-      return "พลศึกษา";
-    case "ศ":
-      return "ศิลปะ";
-    case "ง":
-      return "การงานอาชีพ";
-    case "อ":
-    case "จ":
-    case "ญ":
-      return fallbackGroup && fallbackGroup !== "บริหาร" ? fallbackGroup : "ภาษาต่างประเทศ";
-    default:
-      if (/^IS/i.test(trimmed)) return "IS";
-      return fallbackGroup || trimmed;
+  if (trimmed.startsWith("นิเทศสอน")) return "นิเทศการสอน";
+
+  // 1. ตรวจสอบจากตารางรหัสวิชาตรงตัว
+  const cleanCode = trimmed.replace(/\s+/g, "").replace(/@.*$/, "");
+  if (KNOWN_COURSE_SUBJECTS[cleanCode]) {
+    return KNOWN_COURSE_SUBJECTS[cleanCode];
   }
+  const baseCode = cleanCode.split("-")[0];
+  if (KNOWN_COURSE_SUBJECTS[baseCode]) {
+    return KNOWN_COURSE_SUBJECTS[baseCode];
+  }
+
+  const specialtyStr = String(fallbackGroup || "") + " " + String(teacherSpecialtyOrId || "");
+
+  // 2. หมวดวิทยาศาสตร์
+  if (cleanCode.startsWith("ว")) {
+    if (/^ว3\d20/.test(cleanCode) || specialtyStr.includes("ฟิสิกส์")) {
+      if (cleanCode === "ว32102" || cleanCode === "ว31103" || cleanCode === "ว32103") {
+        return "วิทยาศาสตร์กายภาพ";
+      }
+      return "ฟิสิกส์";
+    }
+    if (/^ว3\d22/.test(cleanCode) || specialtyStr.includes("เคมี")) {
+      return "เคมี";
+    }
+    if (/^ว3\d24/.test(cleanCode) || specialtyStr.includes("ชีววิทยา")) {
+      if (cleanCode === "ว31102") return "วิทยาศาสตร์ชีวภาพ";
+      return "ชีววิทยา";
+    }
+    if (cleanCode === "ว32102" || cleanCode === "ว31103") {
+      return "วิทยาศาสตร์กายภาพ";
+    }
+    if (cleanCode === "ว31102") {
+      return "วิทยาศาสตร์ชีวภาพ";
+    }
+    if (/^ว[12]\d102/.test(cleanCode) || /^ว[12]\d101/.test(cleanCode)) {
+      return "วิทยาศาสตร์พื้นฐาน";
+    }
+    if (/^ว\d+104/.test(cleanCode) || /^ว33282/.test(cleanCode) || specialtyStr.includes("คอมพิวเตอร์")) {
+      return "วิทยาการคำนวณ";
+    }
+    return "วิทยาศาสตร์พื้นฐาน";
+  }
+
+  // 3. หมวดคณิตศาสตร์
+  if (cleanCode.startsWith("ค")) {
+    if (/^ค\d+2\d+/.test(cleanCode) || cleanCode.includes("พต")) {
+      return "คณิตศาสตร์เพิ่มเติม";
+    }
+    if (/^ค\d+1\d+/.test(cleanCode)) {
+      return "คณิตศาสตร์พื้นฐาน";
+    }
+    return "คณิตศาสตร์พื้นฐาน";
+  }
+
+  // 4. หมวดสังคมศึกษา
+  if (cleanCode.startsWith("ส")) {
+    if (/^ส\d+104/.test(cleanCode)) return "ประวัติศาสตร์";
+    if (cleanCode === "ส31103" || cleanCode === "ส33102") return "เศรษฐศาสตร์";
+    if (cleanCode === "ส32103") return "พระพุทธศาสนา";
+    if (cleanCode === "ส32104") return "หน้าที่พลเมือง";
+    if (cleanCode === "ส30241") return "สังคมศึกษาเพิ่มเติม";
+    return "สังคมศึกษา";
+  }
+
+  // 5. หมวดภาษาไทย
+  if (cleanCode.startsWith("ท")) {
+    return "ภาษาไทย";
+  }
+
+  // 6. หมวดภาษาต่างประเทศ
+  if (cleanCode.startsWith("อ")) {
+    if (/^อ\d+2\d+/.test(cleanCode)) return "ภาษาอังกฤษเพิ่มเติม";
+    return "ภาษาอังกฤษ";
+  }
+  if (cleanCode.startsWith("จ")) {
+    return "ภาษาจีน";
+  }
+
+  // 7. หมวดสุขศึกษาและพลศึกษา
+  if (cleanCode.startsWith("พ")) {
+    if (/^พ\d+103/.test(cleanCode)) return "สุขศึกษา";
+    if (cleanCode === "พ21104") return "ฟุตบอล";
+    if (cleanCode === "พ22104") return "กระบี่กระบอง";
+    if (cleanCode === "พ31202") return "แบดมินตัน";
+    if (cleanCode === "พ32202") return "บาสเกตบอล";
+    return "พลศึกษา";
+  }
+
+  // 8. หมวดศิลปะ
+  if (cleanCode.startsWith("ศ")) {
+    return "ศิลปะ";
+  }
+
+  // 9. หมวดการงานอาชีพ
+  if (cleanCode.startsWith("ง")) {
+    return "การงานอาชีพ";
+  }
+
+  if (/^I\d+/i.test(cleanCode) || /^IS/i.test(cleanCode)) {
+    return "การศึกษาค้นคว้าอิสระ (IS)";
+  }
+
+  return fallbackGroup || trimmed;
 }
 
 /**
@@ -726,7 +1014,11 @@ export function buildDocumentRows(
       absentTeacherName: teacher?.n,
       subName: formatCleanSubstituteName(sub.n),
       classRoomLabel: formatClassLevelLabel(slot.cls),
-      subjectName: getSubjectNameFromCourse(slot.code, teacher?.g),
+      subjectName: getSubjectNameFromCourse(
+        slot.code,
+        teacher?.pdfGroup || teacher?.g,
+        teacher?.id
+      ),
       shortDate,
     };
   });
@@ -747,6 +1039,8 @@ export function buildCombinedDocumentRows(
   return combinedSlots.map((slot) => {
     const val = getSlotAssignment(assignments, slot.absentTeacherId, slot.p);
     const sub = resolveSubstitute(val, studentTeacherName);
+    const absentT = getTeacherById(slot.absentTeacherId);
+    const specialty = absentT?.pdfGroup || slot.absentTeacherGroup;
     return {
       p: slot.p + 1,
       tm: slot.tm,
@@ -760,7 +1054,11 @@ export function buildCombinedDocumentRows(
       absentTeacherName: slot.absentTeacherName,
       subName: formatCleanSubstituteName(sub.n),
       classRoomLabel: formatClassLevelLabel(slot.cls),
-      subjectName: getSubjectNameFromCourse(slot.code, slot.absentTeacherGroup),
+      subjectName: getSubjectNameFromCourse(
+        slot.code,
+        specialty,
+        slot.absentTeacherId
+      ),
       shortDate,
     };
   });

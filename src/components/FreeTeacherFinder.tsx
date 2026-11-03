@@ -6,7 +6,12 @@ import {
   PERIOD_TIMES,
   TeacherRecord,
 } from "../data/teachers";
-import { formatRoomLabel, parseScheduleCell } from "../utils/scheduler";
+import {
+  formatRoomLabel,
+  isExcludedFromSubstituting,
+  isSchoolAdministrator,
+  parseScheduleCell,
+} from "../utils/scheduler";
 
 interface FreeTeacherFinderProps {
   teachers: TeacherRecord[];
@@ -176,9 +181,15 @@ export const FreeTeacherFinder: React.FC<FreeTeacherFinderProps> = ({
                       · {t.pdfGroup} ({formatRoomLabel(t.r)})
                     </span>
                   </div>
-                  <span className="text-xs font-semibold text-[#0b7a4b] dark:text-[#4fd39a] whitespace-nowrap">
-                    ว่างพร้อมสอนแทน
-                  </span>
+                  {isExcludedFromSubstituting(t) ? (
+                    <span className="text-xs font-semibold px-2 py-0.5 rounded bg-neutral-100 dark:bg-neutral-800 text-neutral-500 dark:text-neutral-400 whitespace-nowrap">
+                      {isSchoolAdministrator(t) ? "ผู้บริหาร (ไม่จัดสอนแทน)" : "ยกเว้นการสอนแทน"}
+                    </span>
+                  ) : (
+                    <span className="text-xs font-semibold text-[#0b7a4b] dark:text-[#4fd39a] whitespace-nowrap">
+                      ว่างพร้อมสอนแทน
+                    </span>
+                  )}
                 </div>
               ))}
             </div>

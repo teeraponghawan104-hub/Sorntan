@@ -32,11 +32,15 @@ import {
   getSubjectNameFromCourse,
   getTeacherById,
   getTeacherClasses,
+  isTeacherExemptFromNeedingSubstitute,
 } from "../utils/scheduler";
 import {
   LEFT_SCHOOL_LOGO_URL,
   RIGHT_OBEC_LOGO_URL,
+  chunkSubstituteRows,
+  exportSingleSubstitutePageImage,
   exportSubstituteDocument,
+  renderPaperPagesToCanvases,
   renderPaperToCanvas,
 } from "../utils/exportDoc";
 import { SavedSubstituteRecord } from "../utils/databaseStore";
@@ -64,7 +68,6 @@ interface SubstitutePlannerProps {
   onLoadSavedRecord: (record: SavedSubstituteRecord) => void;
   onDeleteSavedRecord: (recordId: string) => Promise<void>;
   onOpenDatabaseTab: () => void;
-  autoSaveState?: "idle" | "saving" | "saved";
 }
 
 const REASON_PRESETS = ["ไปราชการ", "อบรม/สัมมนา", "ลากิจ", "ลาป่วย", "คุมสอบ/นำนักเรียนแข่งขัน"];
@@ -92,7 +95,6 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
   onLoadSavedRecord,
   onDeleteSavedRecord,
   onOpenDatabaseTab,
-  autoSaveState = "saved",
 }) => {
   const paperRef = useRef<HTMLDivElement | null>(null);
   const [statusMsg, setStatusMsg] = useState<{ text: string; type: "ok" | "err" | "info" | "" }>({
@@ -101,19 +103,28 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
   });
   const [isExporting, setIsExporting] = useState(false);
   const [isSavingRecord, setIsSavingRecord] = useState(false);
-  const [previewDataUrl, setPreviewDataUrl] = useState<string>("");
+  const [previewPages, setPreviewPages] = useState<string[]>([]);
+  const previewDataUrl = previewPages[0] || "";
   const [fontReadyTick, setFontReadyTick] = useState<number>(0);
   const [fullscreenImageOpen, setFullscreenImageOpen] = useState<boolean>(false);
   const [addingTeacherPickerOpen, setAddingTeacherPickerOpen] = useState<boolean>(false);
 
-  const regularTeachers = teachers.filter((t) => !t.isStudentTeacher);
-  const studentTeachers = teachers.filter((t) => Boolean(t.isStudentTeacher));
+  // ไม่รวมครูที่ได้รับการยกเว้นไม่ต้องจัดสอนแทนให้ (302 ครูรณสิทธิ์ ประดับศรี)
+  const regularTeachers = teachers.filter(
+    (t) => !t.isStudentTeacher && !isTeacherExemptFromNeedingSubstitute(t)
+  );
+  const studentTeachers = teachers.filter(
+    (t) => Boolean(t.isStudentTeacher) && !isTeacherExemptFromNeedingSubstitute(t)
+  );
 
-  const primaryTeacherId = absentTeacherIds[0] || "";
+  const cleanAbsentIds = absentTeacherIds.filter(
+    (id) => !isTeacherExemptFromNeedingSubstitute(id)
+  );
+  const primaryTeacherId = cleanAbsentIds[0] || "";
   const primaryTeacher = getTeacherById(primaryTeacherId);
 
   // รายชื่อครูที่ลาทุกคนที่เลือกไว้ในตารางเดียวกัน
-  const selectedAbsentTeachers: TeacherRecord[] = absentTeacherIds
+  const selectedAbsentTeachers: TeacherRecord[] = cleanAbsentIds
     .map((id) => getTeacherById(id))
     .filter((t): t is TeacherRecord => Boolean(t));
 
@@ -160,18 +171,18 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
   useEffect(() => {
     let cancelled = false;
     if (!combinedHeaderTeacher || dayIdx < 0 || docRows.length === 0) {
-      setPreviewDataUrl("");
+      setPreviewPages([]);
       return;
     }
-    renderPaperToCanvas(combinedHeaderTeacher, selectedDate, reason, docRows)
-      .then((canvas) => {
+    renderPaperPagesToCanvases(combinedHeaderTeacher, selectedDate, reason, docRows)
+      .then((canvases) => {
         if (!cancelled) {
-          setPreviewDataUrl(canvas.toDataURL("image/png"));
+          setPreviewPages(canvases.map((c) => c.toDataURL("image/png")));
         }
       })
       .catch(() => {
         if (!cancelled) {
-          setPreviewDataUrl("");
+          setPreviewPages([]);
         }
       });
     return () => {
@@ -207,7 +218,13 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
     if (!combinedHeaderTeacher || !canExport) return;
     try {
       setIsExporting(true);
-      setStatusMsg({ text: "กำลังสร้างไฟล์เอกสาร...", type: "info" });
+      const isMultiPageImage = format === "image" && previewPages.length > 1;
+      setStatusMsg({
+        text: isMultiPageImage
+          ? `กำลังสร้างและดาวน์โหลดรูปภาพครบทั้ง ${previewPages.length} หน้า...`
+          : "กำลังสร้างไฟล์เอกสาร...",
+        type: "info",
+      });
       await exportSubstituteDocument(
         format,
         combinedHeaderTeacher,
@@ -216,10 +233,44 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
         docRows,
         paperRef.current
       );
-      setStatusMsg({ text: "บันทึก/แชร์ไฟล์เรียบร้อยแล้ว", type: "ok" });
+      if (isMultiPageImage) {
+        setStatusMsg({
+          text: `ดาวน์โหลดรูปภาพครบทั้ง ${previewPages.length} หน้าเรียบร้อยแล้ว`,
+          type: "ok",
+        });
+      } else {
+        setStatusMsg({ text: "บันทึก/ดาวน์โหลดไฟล์เรียบร้อยแล้ว", type: "ok" });
+      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       setStatusMsg({ text: `สร้างไฟล์ไม่สำเร็จ: ${msg}`, type: "err" });
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
+  const handleDownloadSinglePage = async (pageIdx: number) => {
+    if (!combinedHeaderTeacher || !canExport) return;
+    try {
+      setIsExporting(true);
+      setStatusMsg({
+        text: `กำลังสร้างรูปภาพหน้า ${pageIdx + 1}...`,
+        type: "info",
+      });
+      await exportSingleSubstitutePageImage(
+        combinedHeaderTeacher,
+        selectedDate,
+        reason,
+        docRows,
+        pageIdx
+      );
+      setStatusMsg({
+        text: `ดาวน์โหลดรูปภาพหน้า ${pageIdx + 1} เรียบร้อยแล้ว`,
+        type: "ok",
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setStatusMsg({ text: `ดาวน์โหลดไม่สำเร็จ: ${msg}`, type: "err" });
     } finally {
       setIsExporting(false);
     }
@@ -256,9 +307,11 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
     (t) => t.id === 100 || t.id === 101
   );
 
-  // รายชื่อครูที่ยังไม่ได้อยู่ในตารางลาวันนี้
+  // รายชื่อครูที่ยังไม่ได้อยู่ในตารางลาวันนี้ และไม่ได้ยกเว้นการจัดสอนแทน
   const availableTeachersToAdd = teachers.filter(
-    (t) => !allAbsentNumericIds.includes(t.id)
+    (t) =>
+      !allAbsentNumericIds.includes(t.id) &&
+      !isTeacherExemptFromNeedingSubstitute(t)
   );
 
   return (
@@ -690,7 +743,7 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
           )}
         </div>
 
-        {/* ปุ่มจัดอัตโนมัติ & สถานะบันทึก */}
+        {/* ปุ่มจัดอัตโนมัติ & ปุ่มบันทึกประวัติ (กดบันทึกเมื่อพร้อม) */}
         <div className="flex flex-wrap items-center gap-2 mt-4">
           <button
             type="button"
@@ -706,20 +759,11 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
             type="button"
             disabled={!canExport || isSavingRecord}
             onClick={handleSaveToDatabase}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0b7a4b] hover:bg-[#085c38] disabled:opacity-40 text-white font-medium text-xs sm:text-sm transition-colors cursor-pointer"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0b7a4b] hover:bg-[#085c38] disabled:opacity-40 text-white font-medium text-xs sm:text-sm transition-colors cursor-pointer shadow-xs"
           >
             <Save className="w-3.5 h-3.5 shrink-0" />
             <span>{isSavingRecord ? "กำลังบันทึก..." : "บันทึกประวัติ"}</span>
           </button>
-
-          <span
-            id="autosave-badge"
-            className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 text-xs text-[#0b7a4b] dark:text-[#4fd39a]"
-          >
-            {autoSaveState === "saving"
-              ? "กำลังบันทึก..."
-              : "✓ ซิงก์ข้อมูลแล้ว"}
-          </span>
         </div>
 
         {/* รายการใบสอนแทนที่บันทึกไว้ล่าสุด */}
@@ -898,12 +942,43 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
               </div>
             ) : (
               <>
-                {previewDataUrl && (
-                  <img
-                    src={previewDataUrl}
-                    alt="ตัวอย่างแบบบันทึกการจัดสอนแทน โรงเรียนวรคุณอุปถัมภ์"
-                    className="w-full h-auto block"
-                  />
+                {previewPages.length > 0 && (
+                  <div className="space-y-4">
+                    {previewPages.map((pageUrl, pIdx) => (
+                      <div
+                        key={pIdx}
+                        className="relative bg-white shadow-md rounded overflow-hidden"
+                      >
+                        {previewPages.length > 1 && (
+                          <div className="flex flex-wrap items-center justify-between gap-1.5 px-3 py-1.5 bg-slate-100 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 print:hidden">
+                            <span>
+                              หน้า {pIdx + 1} จาก {previewPages.length}
+                            </span>
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                disabled={isExporting}
+                                onClick={() => handleDownloadSinglePage(pIdx)}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-white dark:bg-[#14204a] hover:bg-blue-50 dark:hover:bg-blue-900 border border-[#c9d4ec] dark:border-[#2a3a6e] text-[#1b4fb8] dark:text-[#6c97ff] text-xs font-medium cursor-pointer shadow-2xs transition-colors"
+                                title={`ดาวน์โหลดเฉพาะรูปภาพหน้า ${pIdx + 1}`}
+                              >
+                                <ImageIcon className="w-3 h-3 shrink-0" />
+                                <span>โหลดรูปหน้า {pIdx + 1}</span>
+                              </button>
+                              <span className="text-[11px] text-slate-500 dark:text-slate-400 font-normal hidden sm:inline">
+                                A4 แนวนอน · ฟอนต์ TH Sarabun PSK ขนาด 16
+                              </span>
+                            </div>
+                          </div>
+                        )}
+                        <img
+                          src={pageUrl}
+                          alt={`ตัวอย่างแบบบันทึกการจัดสอนแทน หน้า ${pIdx + 1}`}
+                          className="w-full h-auto block"
+                        />
+                      </div>
+                    ))}
+                  </div>
                 )}
                 {/* โครงสร้างตาราง Semantic 10 คอลัมน์ตามภาพที่ 1 สำหรับ Screen Reader และการค้นหาข้อความ */}
                 <div
@@ -1038,15 +1113,17 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
       </section>
 
       {/* หน้าต่างขยายดูใบสอนแทนเต็มจอสำหรับ iOS / มือถือ (กดค้างที่รูปเพื่อบันทึกภาพได้ทันที) */}
-      {fullscreenImageOpen && previewDataUrl && (
+      {fullscreenImageOpen && (previewPages.length > 0 || previewDataUrl) && (
         <div
           role="dialog"
           aria-modal="true"
-          className="fixed inset-0 z-50 bg-black/85 flex flex-col items-center justify-center p-3 sm:p-6 overflow-y-auto"
+          className="fixed inset-0 z-50 bg-black/85 flex flex-col items-center justify-start p-3 sm:p-6 overflow-y-auto"
         >
-          <div className="w-full max-w-[1123px] flex items-center justify-between gap-2 mb-3 text-white">
+          <div className="w-full max-w-[1123px] flex items-center justify-between gap-2 mb-3 text-white sticky top-0 z-10 bg-black/70 backdrop-blur-xs py-2 px-3 rounded-lg">
             <span className="text-xs sm:text-sm font-semibold">
-              กดค้างที่รูปภาพใบสอนแทนเพื่อเลือก &ldquo;บันทึกรูปภาพ (Save to Photos)&rdquo; บน iPhone
+              {previewPages.length > 1
+                ? `แสดงครบทั้ง ${previewPages.length} หน้า · กดค้างที่รูปภาพเพื่อบันทึกบนมือถือ`
+                : "กดค้างที่รูปภาพใบสอนแทนเพื่อเลือก \"บันทึกรูปภาพ (Save to Photos)\" บน iPhone"}
             </span>
             <button
               type="button"
@@ -1057,12 +1134,29 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
               <span>ปิด</span>
             </button>
           </div>
-          <div className="w-full max-w-[1123px] bg-white rounded-lg overflow-hidden shadow-2xl">
-            <img
-              src={previewDataUrl}
-              alt="ใบสอนแทนเต็มจอ"
-              className="w-full h-auto block"
-            />
+          <div className="w-full max-w-[1123px] space-y-4">
+            {(previewPages.length > 0 ? previewPages : [previewDataUrl]).map((pageUrl, pIdx) => (
+              <div key={pIdx} className="bg-white rounded-lg overflow-hidden shadow-2xl">
+                {previewPages.length > 1 && (
+                  <div className="flex items-center justify-between px-4 py-2 bg-slate-100 text-slate-800 text-xs font-semibold border-b border-slate-200">
+                    <span>หน้า {pIdx + 1} จาก {previewPages.length}</span>
+                    <button
+                      type="button"
+                      onClick={() => handleDownloadSinglePage(pIdx)}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-[#1b4fb8] text-white hover:bg-[#153e91] text-xs font-medium cursor-pointer"
+                    >
+                      <FileDown className="w-3.5 h-3.5" />
+                      <span>ดาวน์โหลดหน้านี้</span>
+                    </button>
+                  </div>
+                )}
+                <img
+                  src={pageUrl}
+                  alt={`ใบสอนแทน หน้า ${pIdx + 1}`}
+                  className="w-full h-auto block"
+                />
+              </div>
+            ))}
           </div>
         </div>
       )}
