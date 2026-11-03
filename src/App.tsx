@@ -19,16 +19,20 @@ import {
   LIVE_WORKSPACE_DOC_ID,
   LivePlannerWorkspaceState,
   SHARED_OWNER_ID,
+  SUBJECT_MAPPINGS_DOC_ID,
   SavedSubstituteRecord,
   decodeAssignments,
   loadLocalPlannerState,
+  loadLocalSubjectMappings,
   loadLocalSubstituteRecords,
   loadLocalTeachers,
   removeSubstituteRecordFromDatabase,
   removeTeacherFromDatabase,
   saveLocalPlannerState,
+  saveLocalSubjectMappings,
   saveLocalSubstituteRecords,
   saveLocalTeachers,
+  saveSubjectMappingsToCloud,
   syncAllTeachersToCloud,
   upsertSubstituteRecordInDatabase,
   upsertTeacherInDatabase,
@@ -38,10 +42,13 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>("planner");
   const [darkMode, setDarkMode] = useState<boolean>(false);
 
-  // รายชื่อครูทั้งหมดและประวัติใบสอนแทนจากฐานข้อมูลกลาง
+  // รายชื่อครูทั้งหมด, ประวัติใบสอนแทน และรหัสวิชาจากฐานข้อมูลกลาง
   const [teachers, setTeachers] = useState<TeacherRecord[]>(() => loadLocalTeachers());
   const [savedRecords, setSavedRecords] = useState<SavedSubstituteRecord[]>(() =>
     loadLocalSubstituteRecords()
+  );
+  const [subjectMappings, setSubjectMappings] = useState<Record<string, string>>(() =>
+    loadLocalSubjectMappings()
   );
 
   // สถานะ Modal แก้ไข/เพิ่มครู
@@ -181,9 +188,40 @@ export default function App() {
       }
     );
 
+    const mappingsQuery = query(
+      collection(db, "subject_mappings"),
+      where("ownerId", "==", SHARED_OWNER_ID)
+    );
+
+    const unsubMappings = onSnapshot(
+      mappingsQuery,
+      (snapshot) => {
+        if (!snapshot.empty) {
+          snapshot.forEach((docSnap) => {
+            if (docSnap.id === SUBJECT_MAPPINGS_DOC_ID) {
+              const d = docSnap.data();
+              try {
+                const parsed = JSON.parse(String(d.mappingsJson || "{}"));
+                if (parsed && typeof parsed === "object") {
+                  saveLocalSubjectMappings(parsed);
+                  setSubjectMappings(parsed);
+                }
+              } catch {
+                // Ignore parse errors
+              }
+            }
+          });
+        }
+      },
+      (error) => {
+        handleFirestoreError(error, OperationType.LIST, "subject_mappings");
+      }
+    );
+
     return () => {
       unsubTeachers();
       unsubRecords();
+      unsubMappings();
     };
   }, []);
 
@@ -501,6 +539,18 @@ export default function App() {
     setSavedRecords(updated);
   };
 
+  // CRUD: บันทึกผูกชื่อวิชาตามรหัสวิชา
+  const handleSaveSubjectMappings = async (newMappings: Record<string, string>) => {
+    const updated = await saveSubjectMappingsToCloud(newMappings);
+    setSubjectMappings({ ...updated });
+  };
+
+  // CRUD: รีเซ็ตชื่อวิชาตามรหัสวิชาทั้งหมด
+  const handleResetSubjectMappings = async () => {
+    const updated = await saveSubjectMappingsToCloud({});
+    setSubjectMappings({ ...updated });
+  };
+
   return (
     <div className="min-h-screen w-full overflow-x-hidden bg-[#eaf0fa] dark:bg-[#0b1330] text-[#0f2150] dark:text-[#e9eefc] transition-colors">
       <Header
@@ -569,6 +619,7 @@ export default function App() {
           <DatabaseManagerView
             teachers={teachers}
             savedRecords={savedRecords}
+            subjectMappings={subjectMappings}
             onOpenAddTeacher={() => {
               setEditingTeacher(null);
               setEditorModalOpen(true);
@@ -582,9 +633,18 @@ export default function App() {
             onLoadSubstituteRecord={handleLoadSubstituteRecord}
             onDeleteSubstituteRecord={handleDeleteSubstituteRecord}
             onViewTeacherTimetable={handleViewTeacherTimetable}
+            onSaveSubjectMappings={handleSaveSubjectMappings}
+            onResetSubjectMappings={handleResetSubjectMappings}
           />
         )}
       </main>
+
+      <footer className="mt-8 py-4 border-t border-[#c9d4ec] dark:border-[#2a3a6e] text-center text-xs text-[#51608a] dark:text-[#9fb0dc] print:hidden">
+        <p>ระบบจัดสอนแทน โรงเรียนวรคุณอุปถัมภ์</p>
+        <p className="mt-0.5 font-medium text-[#1b4fb8] dark:text-[#6c97ff]">
+          พัฒนาโดย นักศึกษาฝึกวิชาชีพครู นายธีระพงษ์ หาวัน
+        </p>
+      </footer>
 
       {editorModalOpen && (
         <TeacherEditorModal

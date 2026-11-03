@@ -386,23 +386,23 @@ test("chunkSubstituteRows keeps <= 7 rows on a single page and cleanly paginates
     g: "ภาษาไทย",
   });
 
-  // 1 to 11 rows -> exactly 1 page (fits comfortably on A4 landscape with signatures)
+  // 1 to 13 rows -> exactly 1 page (fits comfortably on A4 landscape with signatures)
   const rows4 = [makeFakeRow(0), makeFakeRow(1), makeFakeRow(2), makeFakeRow(3)];
   const pages4 = chunkSubstituteRows(rows4);
   assert.equal(pages4.length, 1);
   assert.equal(pages4[0].length, 4);
 
-  const rows11 = Array.from({ length: 11 }, (_, i) => makeFakeRow(i));
-  const pages11 = chunkSubstituteRows(rows11);
-  assert.equal(pages11.length, 1);
-  assert.equal(pages11[0].length, 11);
+  const rows13 = Array.from({ length: 13 }, (_, i) => makeFakeRow(i));
+  const pages13 = chunkSubstituteRows(rows13);
+  assert.equal(pages13.length, 1);
+  assert.equal(pages13[0].length, 13);
 
-  // 15 rows (user's Thursday test case) -> splits into 2 pages: page 1 has 11 rows, page 2 has 4 rows + signatures
+  // 15 rows -> splits into 2 pages: page 1 fills 13 rows, page 2 has 2 rows + signatures
   const rows15 = Array.from({ length: 15 }, (_, i) => makeFakeRow(i));
   const pages15 = chunkSubstituteRows(rows15);
   assert.equal(pages15.length, 2);
-  assert.equal(pages15[0].length, 11);
-  assert.equal(pages15[1].length, 4);
+  assert.equal(pages15[0].length, 13);
+  assert.equal(pages15[1].length, 2);
 
   // 18 rows -> 2 pages: page 1 fills 14 rows, page 2 has 4 rows + signatures
   const rows18 = Array.from({ length: 18 }, (_, i) => makeFakeRow(i));

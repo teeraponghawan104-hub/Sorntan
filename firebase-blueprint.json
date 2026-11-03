@@ -176,6 +176,49 @@
         "createdAt",
         "updatedAt"
       ]
+    },
+    "SubjectMapping": {
+      "title": "SubjectMapping",
+      "description": "Custom mapping from subject code to display subject name (shared school scope)",
+      "type": "object",
+      "properties": {
+        "recordId": {
+          "type": "string",
+          "description": "Document ID ('custom')",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "mappingsJson": {
+          "type": "string",
+          "description": "JSON serialized object mapping subject code to custom subject name",
+          "maxLength": 5000
+        },
+        "ownerId": {
+          "type": "string",
+          "description": "Shared school scope identifier ('worakhun_shared')",
+          "minLength": 1,
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server creation timestamp"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server update timestamp"
+        }
+      },
+      "required": [
+        "recordId",
+        "mappingsJson",
+        "ownerId",
+        "createdAt",
+        "updatedAt"
+      ]
     }
   },
   "firestore": {
@@ -186,6 +229,10 @@
     "/substitute_records/{recordId}": {
       "schema": { "$ref": "#/entities/SubstituteRecord" },
       "description": "Stores shared saved substitute teaching assignment forms and live auto-saved planner state"
+    },
+    "/subject_mappings/{mappingId}": {
+      "schema": { "$ref": "#/entities/SubjectMapping" },
+      "description": "Stores custom subject code to subject name mapping overrides"
     }
   }
 }

@@ -124,6 +124,29 @@ service cloud.firestore {
       data.updatedAt is timestamp;
     }
 
+    // Validation Blueprint: SubjectMapping
+    function isValidSubjectMapping(data) {
+      return data.keys().hasAll([
+        'recordId',
+        'mappingsJson',
+        'ownerId',
+        'createdAt',
+        'updatedAt'
+      ]) &&
+      data.keys().hasOnly([
+        'recordId',
+        'mappingsJson',
+        'ownerId',
+        'createdAt',
+        'updatedAt'
+      ]) &&
+      data.recordId is string && data.recordId.size() >= 1 && data.recordId.size() <= 128 && data.recordId.matches('^[a-zA-Z0-9_\\-]+$') &&
+      data.mappingsJson is string && data.mappingsJson.size() <= 5000 &&
+      isSharedScope(data.ownerId) &&
+      data.createdAt is timestamp &&
+      data.updatedAt is timestamp;
+    }
+
     // Collection: /teachers/{teacherId}
     match /teachers/{teacherId} {
       allow get: if isValidId(teacherId) && (resource == null || existing().ownerId == 'worakhun_shared');
@@ -183,6 +206,30 @@ service cloud.firestore {
           'updatedAt'
         ]);
       allow delete: if isValidId(recordId) && existing().ownerId == 'worakhun_shared';
+    }
+
+    // Collection: /subject_mappings/{mappingId}
+    match /subject_mappings/{mappingId} {
+      allow get: if isValidId(mappingId) && (resource == null || existing().ownerId == 'worakhun_shared');
+      allow list: if resource.data.ownerId == 'worakhun_shared';
+      allow create: if isValidId(mappingId) && isValidSubjectMapping(incoming()) &&
+        incoming().recordId == mappingId &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+      allow update: if isValidId(mappingId) && isValidSubjectMapping(incoming()) &&
+        existing().ownerId == 'worakhun_shared' &&
+        incoming().recordId == existing().recordId &&
+        incoming().ownerId == existing().ownerId &&
+        ('createdAt' in existing() ? incoming().createdAt == existing().createdAt : incoming().createdAt == request.time) &&
+        incoming().updatedAt == request.time &&
+        incoming().diff(existing()).affectedKeys().hasOnly([
+          'recordId',
+          'mappingsJson',
+          'ownerId',
+          'createdAt',
+          'updatedAt'
+        ]);
+      allow delete: if isValidId(mappingId) && existing().ownerId == 'worakhun_shared';
     }
   }
 }

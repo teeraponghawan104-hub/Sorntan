@@ -36,8 +36,8 @@ export const Header: React.FC<HeaderProps> = ({
               <h1 className="text-[15px] sm:text-xl md:text-2xl font-bold leading-tight tracking-tight text-white">
                 ระบบจัดสอนแทน โรงเรียนวรคุณอุปถัมภ์
               </h1>
-              <p className="text-[12px] sm:text-xs text-blue-100/80 leading-snug mt-0.5">
-                ภาคเรียนที่ 2 ปีการศึกษา 2569
+              <p className="text-[12px] sm:text-xs text-blue-100/90 leading-snug mt-0.5">
+                ภาคเรียนที่ 2 ปีการศึกษา 2569 · พัฒนาโดย นักศึกษาฝึกวิชาชีพครู นายธีระพงษ์ หาวัน
               </p>
             </div>
           </div>

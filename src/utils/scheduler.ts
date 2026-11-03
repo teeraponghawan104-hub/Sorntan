@@ -840,9 +840,18 @@ export const KNOWN_COURSE_SUBJECTS: Record<string, string> = {
   "IS-11": "การศึกษาค้นคว้าอิสระ (IS)",
 };
 
+export let CUSTOM_SUBJECT_MAPPINGS: Record<string, string> = {};
+
+/**
+ * กำหนดค่าชื่อวิชาตามรหัสวิชาแบบกำหนดเอง (Custom Overrides)
+ */
+export function setRuntimeSubjectMappings(mappings: Record<string, string>): void {
+  CUSTOM_SUBJECT_MAPPINGS = { ...mappings };
+}
+
 /**
  * แปลงรหัสวิชาเป็นชื่อวิชาเฉพาะที่สอนจริง (ไม่ใช่ชื่อกลุ่มสาระ)
- * เช่น เคมี, ฟิสิกส์, ชีววิทยา, วิทยาศาสตร์พื้นฐาน, วิทยาศาสตร์กายภาพ, คณิตศาสตร์พื้นฐาน, คณิตศาสตร์เพิ่มเติม
+ * โดยจะตรวจสอบจากชื่อวิชาที่ผู้ใช้อัปเดตเอง (Custom Mappings) ก่อนเสมอ
  */
 export function getSubjectNameFromCourse(
   code: string,
@@ -853,12 +862,24 @@ export function getSubjectNameFromCourse(
   if (!trimmed || trimmed === "-") return fallbackGroup || "-";
   if (trimmed.startsWith("นิเทศสอน")) return "นิเทศการสอน";
 
-  // 1. ตรวจสอบจากตารางรหัสวิชาตรงตัว
   const cleanCode = trimmed.replace(/\s+/g, "").replace(/@.*$/, "");
+
+  // 0. ตรวจสอบจากชื่อวิชาที่กำหนดเอง (Custom Mappings) ก่อน
+  if (CUSTOM_SUBJECT_MAPPINGS[cleanCode]) {
+    return CUSTOM_SUBJECT_MAPPINGS[cleanCode];
+  }
+  if (CUSTOM_SUBJECT_MAPPINGS[trimmed]) {
+    return CUSTOM_SUBJECT_MAPPINGS[trimmed];
+  }
+  const baseCode = cleanCode.split("-")[0];
+  if (CUSTOM_SUBJECT_MAPPINGS[baseCode]) {
+    return CUSTOM_SUBJECT_MAPPINGS[baseCode];
+  }
+
+  // 1. ตรวจสอบจากตารางรหัสวิชาตรงตัว (System Default Map)
   if (KNOWN_COURSE_SUBJECTS[cleanCode]) {
     return KNOWN_COURSE_SUBJECTS[cleanCode];
   }
-  const baseCode = cleanCode.split("-")[0];
   if (KNOWN_COURSE_SUBJECTS[baseCode]) {
     return KNOWN_COURSE_SUBJECTS[baseCode];
   }
@@ -1135,4 +1156,71 @@ export function formatRoomLabel(room: string): string {
   if (trimmed.startsWith("ห้อง")) return trimmed;
   return `ห้อง ${trimmed}`;
 }
+
+export interface SubjectCodeInfo {
+  code: string;
+  defaultName: string;
+  currentName: string;
+  isCustom: boolean;
+  teachersCount: number;
+  teacherNames: string[];
+}
+
+/**
+ * ดึงรายการรหัสวิชาทั้งหมดที่มีในระบบ (ทั้งจากตารางสอนครู และจาก KNOWN_COURSE_SUBJECTS)
+ */
+export function getAllDiscoveredSubjectCodes(): SubjectCodeInfo[] {
+  const codeToTeachers: Record<string, Set<string>> = {};
+
+  TEACHERS.forEach((t) => {
+    if (!t.d) return;
+    t.d.forEach((dayRow) => {
+      dayRow.forEach((cell) => {
+        const parsed = parseScheduleCell(cell, t.r);
+        if (parsed.isTeachable && parsed.code && parsed.code !== "-") {
+          const clean = parsed.code.trim();
+          if (!codeToTeachers[clean]) {
+            codeToTeachers[clean] = new Set();
+          }
+          codeToTeachers[clean].add(t.n);
+        }
+      });
+    });
+  });
+
+  const allCodesSet = new Set<string>([
+    ...Object.keys(KNOWN_COURSE_SUBJECTS),
+    ...Object.keys(codeToTeachers),
+    ...Object.keys(CUSTOM_SUBJECT_MAPPINGS),
+  ]);
+
+  const results: SubjectCodeInfo[] = [];
+
+  allCodesSet.forEach((code) => {
+    const cleanCode = code.trim();
+    if (!cleanCode) return;
+
+    const customOverride = CUSTOM_SUBJECT_MAPPINGS[cleanCode];
+    const defaultName = KNOWN_COURSE_SUBJECTS[cleanCode] || KNOWN_COURSE_SUBJECTS[cleanCode.split("-")[0]] || "-";
+    const resolvedDefault = defaultName !== "-" ? defaultName : getSubjectNameFromCourse(cleanCode);
+
+    const isCustom = Boolean(customOverride);
+    const currentName = customOverride || resolvedDefault;
+
+    const teacherSet = codeToTeachers[cleanCode] || new Set();
+    const teacherNames = Array.from(teacherSet);
+
+    results.push({
+      code: cleanCode,
+      defaultName: resolvedDefault,
+      currentName,
+      isCustom,
+      teachersCount: teacherNames.length,
+      teacherNames,
+    });
+  });
+
+  return results.sort((a, b) => a.code.localeCompare(b.code, "th"));
+}
+
 

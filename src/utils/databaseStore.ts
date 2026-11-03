@@ -17,14 +17,17 @@ import {
   hydrateTeacherSchedule,
   setRuntimeTeachers,
 } from "../data/teachers";
+import { setRuntimeSubjectMappings } from "./scheduler";
 import { OperationType, db, handleFirestoreError } from "../firebase";
 
 const LOCAL_TEACHERS_KEY = "worakhun_teachers_db_v2";
 const LOCAL_RECORDS_KEY = "worakhun_sub_records_db_v2";
 const LOCAL_PLANNER_STATE_KEY = "worakhun_live_planner_v2";
+const LOCAL_SUBJECT_MAPPINGS_KEY = "worakhun_subject_mappings_v2";
 
 export const SHARED_OWNER_ID = "worakhun_shared";
 export const LIVE_WORKSPACE_DOC_ID = "live_workspace";
+export const SUBJECT_MAPPINGS_DOC_ID = "custom";
 
 export interface SavedSubstituteRecord {
   recordId: string;
@@ -222,6 +225,78 @@ export function saveLocalPlannerState(state: LivePlannerWorkspaceState): void {
   } catch {
     // Ignore storage quota errors
   }
+}
+
+export function loadLocalSubjectMappings(): Record<string, string> {
+  try {
+    if (typeof localStorage === "undefined") {
+      setRuntimeSubjectMappings({});
+      return {};
+    }
+    const raw = localStorage.getItem(LOCAL_SUBJECT_MAPPINGS_KEY);
+    if (!raw) {
+      setRuntimeSubjectMappings({});
+      return {};
+    }
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      setRuntimeSubjectMappings(parsed);
+      return parsed;
+    }
+    setRuntimeSubjectMappings({});
+    return {};
+  } catch {
+    setRuntimeSubjectMappings({});
+    return {};
+  }
+}
+
+export function saveLocalSubjectMappings(
+  mappings: Record<string, string>
+): Record<string, string> {
+  setRuntimeSubjectMappings(mappings);
+  try {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(LOCAL_SUBJECT_MAPPINGS_KEY, JSON.stringify(mappings));
+    }
+  } catch {
+    // Ignore storage quota errors
+  }
+  return mappings;
+}
+
+export async function saveSubjectMappingsToCloud(
+  mappings: Record<string, string>
+): Promise<Record<string, string>> {
+  saveLocalSubjectMappings(mappings);
+
+  const path = `subject_mappings/${SUBJECT_MAPPINGS_DOC_ID}`;
+  const docRef = doc(db, "subject_mappings", SUBJECT_MAPPINGS_DOC_ID);
+  const mappingsJson = JSON.stringify(mappings).slice(0, 5000);
+
+  await enqueueCloudWrite(async () => {
+    try {
+      const existingSnap = await getDoc(docRef);
+      if (existingSnap.exists()) {
+        await updateDoc(docRef, {
+          mappingsJson,
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        await setDoc(docRef, {
+          recordId: SUBJECT_MAPPINGS_DOC_ID,
+          mappingsJson,
+          ownerId: SHARED_OWNER_ID,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, path);
+    }
+  });
+
+  return mappings;
 }
 
 export function getTeacherDocId(teacherId: number): string {

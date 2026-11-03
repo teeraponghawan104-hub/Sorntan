@@ -1,10 +1,6 @@
 import JSZip from "jszip";
 import { jsPDF } from "jspdf";
 import { SCHOOL_LOGO } from "../data/logo";
-import {
-  TEERAPONG_SIGNATURE_BASE64,
-  TEERAPONG_SIGNATURE_RAW_B64,
-} from "../data/signature";
 import { TeacherRecord } from "../data/teachers";
 import {
   SubstituteRow,
@@ -18,7 +14,6 @@ import {
 export const LEFT_SCHOOL_LOGO_URL =
   "/assets/aistudio/___________________________1__5adb99dd.png";
 export const RIGHT_OBEC_LOGO_URL = "/assets/aistudio/______2_edcf2277.jpg";
-export const TEERAPONG_SIGNATURE_URL = "/assets/signature_teerapong.png";
 
 const THAI_FONT_SAMPLE =
   "แบบบันทึกการจัดสอนแทนประจำเดือนพฤษภาคมพฤศจิกายนโรงเรียนวรคุณอุปถัมภ์0123456789";
@@ -251,13 +246,13 @@ export const TH_SARABUN_FONT_STACK =
 
 /**
  * แบ่งแถวคาบสอนแทนออกเป็นหน้าๆ โดยอิงจากขอบกระดาษ A4 แนวนอน (เอกสารราชการ)
- * - หน้าที่มีกล่องลงนาม (หน้าเดียว หรือหน้าสุดท้าย): บรรจุได้สูงสุด 11 คาบ เพื่อป้องกันไม่ให้ตารางชนหรือทับกล่องลงนามเด็ดขาด
+ * - หน้าที่มีกล่องลงนาม (หน้าเดียว หรือหน้าสุดท้าย): บรรจุได้สูงสุด 13 คาบ เพื่อให้เต็มพื้นที่หน้าก่อนตัดหน้าอย่างสวยงาม
  * - หน้าที่ไม่มีกล่องลงนาม (หน้าแรกของเอกสารหลายหน้า): บรรจุได้ถึง 14 คาบ ชิดขอบกระดาษล่าง
  * - หน้าสุดท้าย: ต้องมีคาบสอนเหลืออยู่อย่างน้อย 2 คาบ พร้อมกล่องลงนามท้ายเอกสาร
  */
 export function chunkSubstituteRows(
   rows: SubstituteRow[],
-  maxSinglePage = 11,
+  maxSinglePage = 13,
   maxNonFinalPage = 14,
   minFinalPageRows = 2
 ): SubstituteRow[][] {
@@ -281,9 +276,8 @@ export function chunkSubstituteRows(
     const leftover = remaining.length - take;
 
     // ถ้าตัดไปแล้ว หน้าสุดท้ายจะเหลือน้อยกว่า minFinalPageRows
-    if (leftover < minFinalPageRows) {
-      // ปรับให้หน้าสุดท้ายมีอย่างน้อย 4 แถว (เช่น 15 แถว: หน้าแรกได้ 11 แถว, หน้าสุดท้ายได้ 4 แถว)
-      take = Math.max(1, remaining.length - 4);
+    if (leftover > 0 && leftover < minFinalPageRows) {
+      take = Math.max(1, remaining.length - minFinalPageRows);
     } else if (leftover > maxSinglePage) {
       // ถ้าแถวที่เหลือยังเกินความจุหน้าสุดท้าย ให้กระจายให้สมดุล
       take = Math.min(maxNonFinalPage, Math.ceil(remaining.length / 2));
@@ -396,15 +390,6 @@ export async function renderPaperPageCanvas(
     );
   } catch {
     // Skip if right logo fails
-  }
-
-  let teerapongSigImg: HTMLImageElement | null = null;
-  try {
-    teerapongSigImg = await loadImage(TEERAPONG_SIGNATURE_BASE64).catch(() =>
-      loadImage(TEERAPONG_SIGNATURE_URL)
-    );
-  } catch {
-    // Skip if signature fails
   }
 
   // 2. วาดหัวกระดาษตรงกลาง (ตัวหนังสือ TH Sarabun PSK ตัวหนา)
@@ -542,10 +527,10 @@ export async function renderPaperPageCanvas(
   // 4. วาดกล่องลงนาม 2 กล่องตีกรอบสี่เหลี่ยมด้านล่าง (เฉพาะหน้าสุดท้ายของเอกสาร)
   if (isLastPage) {
     const sigBoxHeight = 104;
-    // ปรับตำแหน่ง Y ของกล่องลงนามให้อิงขอบกระดาษล่างและห่างจากตารางอย่างสมดุล โดยต้องอยู่ใต้ตารางเสมอ
-    const idealSigBoxY = Math.max(cursorY + 22, 620);
+    // ปรับตำแหน่ง Y ของกล่องลงนามให้ขยับลงมาเว้นระยะห่างจากตารางสวยงาม
+    const idealSigBoxY = cursorY + 54;
     const maxSigBoxY = pageHeight - 36 - sigBoxHeight;
-    const sigBoxY = Math.max(Math.min(idealSigBoxY, maxSigBoxY), cursorY + 16);
+    const sigBoxY = Math.max(Math.min(idealSigBoxY, maxSigBoxY), cursorY + 40);
 
     ctx.lineWidth = 1.6;
     ctx.strokeStyle = "#000000";
@@ -569,14 +554,6 @@ export async function renderPaperPageCanvas(
       fontStack
     );
 
-    // วาดลายเซ็นนายธีระพงษ์ หาวัน เซ็นทับช่วงเส้นประลงชื่ออย่างประณีตและพอดี
-    if (teerapongSigImg) {
-      const sigW = 84;
-      const sigH = (teerapongSigImg.naturalHeight / teerapongSigImg.naturalWidth) * sigW;
-      const sigX = leftCenterX - sigW / 2 - 12;
-      const sigY = sigBoxY + 4;
-      ctx.drawImage(teerapongSigImg, sigX, sigY, sigW, sigH);
-    }
     drawFittedCellLine(
       ctx,
       "(นายธีระพงษ์ หาวัน)",
@@ -775,23 +752,14 @@ function buildDocxSheetBodyXml(
   // กล่องลงนาม 2 กล่องตีกรอบสี่เหลี่ยมด้านล่าง
   const boxBorders = `<w:tcBorders><w:top w:val="single" w:sz="12" w:space="0" w:color="000000"/><w:left w:val="single" w:sz="12" w:space="0" w:color="000000"/><w:bottom w:val="single" w:sz="12" w:space="0" w:color="000000"/><w:right w:val="single" w:sz="12" w:space="0" w:color="000000"/></w:tcBorders>`;
   const noBorders = `<w:tcBorders><w:top w:val="nil"/><w:left w:val="nil"/><w:bottom w:val="nil"/><w:right w:val="nil"/></w:tcBorders>`;
-
-  const sigGridXml = `<w:tblGrid><w:gridCol w:w="1000"/><w:gridCol w:w="5800"/><w:gridCol w:w="1600"/><w:gridCol w:w="5800"/><w:gridCol w:w="1000"/></w:tblGrid>`;
-
-  const sigDrawing = inlineImageXml(
-    "rIdSig",
-    99990 + docPrIdBase,
-    650000,
-    436000,
-    "signature_teerapong.png"
-  );
+  const sigGridXml = `<w:tblGrid><w:gridCol w:w="1000"/><w:gridCol w:w="5800"/><w:gridCol w:w="1600"/><w:gridCol w:w="5800"/></w:tblGrid>`;
 
   const sigTable = `<w:tbl><w:tblPr><w:tblW w:w="15200" w:type="dxa"/><w:tblLayout w:type="fixed"/><w:tblCellMar><w:top w:w="140" w:type="dxa"/><w:bottom w:w="140" w:type="dxa"/><w:left w:w="140" w:type="dxa"/><w:right w:w="140" w:type="dxa"/></w:tblCellMar></w:tblPr>${sigGridXml}<w:tr><w:trPr><w:cantSplit/></w:trPr><w:tc><w:tcPr><w:tcW w:w="1000" w:type="dxa"/>${noBorders}</w:tcPr>${P(
     ""
   )}</w:tc><w:tc><w:tcPr><w:tcW w:w="5800" w:type="dxa"/>${boxBorders}<w:vAlign w:val="center"/></w:tcPr>${P(
     "ลงชื่อ.................................ผู้จัดสอนแทน",
-    { c: 1, a: 20, z: 32 }
-  )}${sigDrawing}${P("(นายธีระพงษ์ หาวัน)", { c: 1, a: 40, z: 32 })}${P(
+    { c: 1, a: 80, z: 32 }
+  )}${P("(นายธีระพงษ์ หาวัน)", { c: 1, a: 80, z: 32 })}${P(
     "งานการจัดการเรียนการสอน",
     { c: 1, a: 0, z: 32 }
   )}</w:tc><w:tc><w:tcPr><w:tcW w:w="1600" w:type="dxa"/>${noBorders}</w:tcPr>${P(
@@ -868,7 +836,7 @@ function buildDocxSheetBodyXml(
     // หน้าสุดท้าย: ใส่กล่องลงนาม
     if (isLast) {
       const spacingBeforeSig =
-        pageChunk.length > 10 ? 100 : pageChunk.length > 6 ? 160 : 260;
+        pageChunk.length > 10 ? 180 : pageChunk.length > 6 ? 300 : 420;
       pageXml += P("", { a: spacingBeforeSig }) + sigTable;
     }
 
