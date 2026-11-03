@@ -42,6 +42,10 @@ export interface SubstituteRow {
   slotKey?: string;
   absentTeacherId?: number;
   absentTeacherName?: string;
+  subName?: string;         // ชื่อ-สกุล ผู้สอนแทน (ไม่มีวงเล็บต่อท้าย สำหรับใบแบบบันทึกการจัดสอนแทน)
+  classRoomLabel?: string;  // ห้อง เช่น ม.1/2, ม.3/1
+  subjectName?: string;     // วิชา เช่น ภาษาไทย, คณิตศาสตร์
+  shortDate?: string;       // วันที่รูปแบบย่อ พ.ศ. เช่น 18/05/69
 }
 
 export function getTeacherById(id: string | number): TeacherRecord | undefined {
@@ -242,13 +246,33 @@ export interface AbsentTeacherEntry {
 }
 
 /**
+ * ตรวจสอบว่าเป็นผู้บริหารสถานศึกษาหรือไม่ (ผู้อำนวยการ, รองผู้อำนวยการ, ผู้ช่วยผู้อำนวยการ, ฝ่ายบริหาร)
+ * เพื่อป้องกันไม่ให้ระบบนำผู้บริหารมาจัดสอนแทนเด็ดขาดตามนโยบายโรงเรียน
+ */
+export function isSchoolAdministrator(teacher: TeacherRecord | undefined): boolean {
+  if (!teacher) return false;
+  if (teacher.g === "บริหาร" || teacher.pdfGroup === "บริหาร") return true;
+  if (teacher.id === 100 || teacher.id === 101 || teacher.id === 202) return true;
+  const name = teacher.n || "";
+  if (
+    name.includes("ผู้อำนวยการ") ||
+    name.includes("ผอ.") ||
+    name.includes("รองผู้อำนวยการ") ||
+    name.includes("ผู้ช่วยผู้อำนวยการ")
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
  * ค้นหาครูและนักศึกษาฝึกสอนที่ว่างในวันและคาบที่กำหนด
  * เรียงลำดับ:
  * 1) ครูประจำการในกลุ่มสาระเดียวกัน (!isStudentTeacher && g === absent.g)
  * 2) นักศึกษาฝึกสอนที่ว่างในคาบนั้น (isStudentTeacher) โดยเรียงกลุ่มสาระเดียวกันขึ้นก่อน
  * 3) ครูประจำการต่างกลุ่มสาระ (!isStudentTeacher && g !== absent.g)
  *
- * โดยตัดรายชื่อครูที่ลาในวันเดียวกัน (excludedTeacherIds) ออกทันที
+ * โดยตัดรายชื่อครูที่ลาในวันเดียวกัน (excludedTeacherIds) และผู้บริหารสถานศึกษาออกเด็ดขาด
  */
 export function getCandidateTeachers(
   absentTeacherId: string | number,
@@ -268,6 +292,8 @@ export function getCandidateTeachers(
 
   return TEACHERS.filter((t) => {
     if (excludedSet.has(t.id)) return false;
+    // ผู้บริหารโรงเรียน (100 ผอ., 101 รอง ผอ., 202 ผู้ช่วย ผอ., ฝ่ายบริหาร) ไม่จัดมาสอนแทนเด็ดขาด
+    if (isSchoolAdministrator(t)) return false;
     const cell = t.d?.[dayIdx]?.[periodIndex] || "";
     // ต้องไม่มีคาบสอน ไม่ติดประชุม (*) ไม่ติดนิเทศสอน หรือกิจกรรมในคาบนั้น
     return cell.trim() === "";
@@ -565,6 +591,110 @@ export function resolveSubstitute(
   return { n: t.n, g: t.pdfGroup };
 }
 
+export const THAI_MONTHS = [
+  "มกราคม",
+  "กุมภาพันธ์",
+  "มีนาคม",
+  "เมษายน",
+  "พฤษภาคม",
+  "มิถุนายน",
+  "กรกฎาคม",
+  "สิงหาคม",
+  "กันยายน",
+  "ตุลาคม",
+  "พฤศจิกายน",
+  "ธันวาคม",
+] as const;
+
+/**
+ * แปลงชื่อผู้สอนแทนสำหรับแสดงในคอลัมน์ "ชื่อ-สกุล ผู้สอนแทน" ของแบบบันทึกการจัดสอนแทน
+ */
+export function formatCleanSubstituteName(rawSubName: string): string {
+  const trimmed = String(rawSubName || "").trim();
+  if (!trimmed || trimmed === "-") return "-";
+  const customStMatch = trimmed.match(/^นักศึกษาฝึกสอน\s*\((.+)\)$/);
+  if (customStMatch && customStMatch[1].trim()) {
+    return customStMatch[1].trim();
+  }
+  const withoutTag = trimmed.replace(/\s*\(นศ\.ฝึกสอน\)\s*$/, "").trim();
+  if (withoutTag === "ครูสุภาวรรณ ปวยทอง") {
+    return "นางสาวสุภาวรรณ ปวยทอง";
+  }
+  return withoutTag;
+}
+
+/**
+ * แปลงชั้นเรียนให้มีคำว่า "ม." นำหน้าสำหรับคอลัมน์ "ห้อง" เช่น "1/2" -> "ม.1/2"
+ */
+export function formatClassLevelLabel(cls: string): string {
+  const trimmed = String(cls || "").trim();
+  if (!trimmed || trimmed === "-") return "-";
+  if (trimmed.startsWith("ม.")) return trimmed;
+  if (/^[1-6](\/\d+)?$/.test(trimmed)) {
+    return `ม.${trimmed}`;
+  }
+  return trimmed;
+}
+
+/**
+ * แปลงรหัสวิชาเป็นชื่อวิชาสำหรับคอลัมน์ "วิชา" เช่น ท21101 -> ภาษาไทย
+ */
+export function getSubjectNameFromCourse(code: string, fallbackGroup?: string): string {
+  const trimmed = String(code || "").trim();
+  if (!trimmed || trimmed === "-") return fallbackGroup || "-";
+  if (trimmed.startsWith("นิเทศสอน")) return "นิเทศสอน";
+  const firstChar = trimmed.charAt(0);
+  switch (firstChar) {
+    case "ท":
+      return "ภาษาไทย";
+    case "ค":
+      return "คณิตศาสตร์";
+    case "ว":
+      return "วิทยาศาสตร์";
+    case "ส":
+      return "สังคมศึกษา";
+    case "พ":
+      return "พลศึกษา";
+    case "ศ":
+      return "ศิลปะ";
+    case "ง":
+      return "การงานอาชีพ";
+    case "อ":
+    case "จ":
+    case "ญ":
+      return fallbackGroup && fallbackGroup !== "บริหาร" ? fallbackGroup : "ภาษาต่างประเทศ";
+    default:
+      if (/^IS/i.test(trimmed)) return "IS";
+      return fallbackGroup || trimmed;
+  }
+}
+
+/**
+ * แปลงวันที่ YYYY-MM-DD เป็นรูปแบบย่อ พ.ศ. DD/MM/YY เช่น "18/05/69"
+ */
+export function formatShortThaiDate(dateStr: string): string {
+  if (!dateStr) return "-";
+  const dt = new Date(dateStr + "T00:00:00");
+  if (isNaN(dt.getTime())) return "-";
+  const dd = String(dt.getDate()).padStart(2, "0");
+  const mm = String(dt.getMonth() + 1).padStart(2, "0");
+  const buddhistYear = dt.getFullYear() + 543;
+  const yy = String(buddhistYear).slice(-2);
+  return `${dd}/${mm}/${yy}`;
+}
+
+/**
+ * แปลงวันที่ YYYY-MM-DD เป็นข้อความหัวกระดาษ "ประจำเดือน <เดือนไทย> พ.ศ. <ปี พ.ศ.>"
+ * เช่น "ประจำเดือน พฤษภาคม พ.ศ. 2569"
+ */
+export function formatThaiMonthYearHeader(dateStr: string): string {
+  const dt = dateStr ? new Date(dateStr + "T00:00:00") : new Date();
+  const validDt = isNaN(dt.getTime()) ? new Date() : dt;
+  const monthName = THAI_MONTHS[validDt.getMonth()] || "พฤษภาคม";
+  const buddhistYear = validDt.getFullYear() + 543;
+  return `ประจำเดือน ${monthName} พ.ศ. ${buddhistYear}`;
+}
+
 /**
  * สร้างข้อมูลแถวสำหรับใบสอนแทน (ครู 1 ท่าน)
  */
@@ -577,6 +707,7 @@ export function buildDocumentRows(
 ): SubstituteRow[] {
   const teacher = getTeacherById(absentTeacherId);
   const classes = getTeacherClasses(absentTeacherId, dateStr, includeSupervision);
+  const shortDate = formatShortThaiDate(dateStr);
   return classes.map((slot) => {
     const val = teacher
       ? getSlotAssignment(assignments, teacher.id, slot.p)
@@ -593,6 +724,10 @@ export function buildDocumentRows(
       slotKey: teacher ? `${teacher.id}_${slot.p}` : String(slot.p),
       absentTeacherId: teacher?.id,
       absentTeacherName: teacher?.n,
+      subName: formatCleanSubstituteName(sub.n),
+      classRoomLabel: formatClassLevelLabel(slot.cls),
+      subjectName: getSubjectNameFromCourse(slot.code, teacher?.g),
+      shortDate,
     };
   });
 }
@@ -608,6 +743,7 @@ export function buildCombinedDocumentRows(
   includeSupervision = false
 ): SubstituteRow[] {
   const combinedSlots = getCombinedTeacherClasses(teacherIds, dateStr, includeSupervision);
+  const shortDate = formatShortThaiDate(dateStr);
   return combinedSlots.map((slot) => {
     const val = getSlotAssignment(assignments, slot.absentTeacherId, slot.p);
     const sub = resolveSubstitute(val, studentTeacherName);
@@ -622,6 +758,10 @@ export function buildCombinedDocumentRows(
       slotKey: slot.slotKey,
       absentTeacherId: slot.absentTeacherId,
       absentTeacherName: slot.absentTeacherName,
+      subName: formatCleanSubstituteName(sub.n),
+      classRoomLabel: formatClassLevelLabel(slot.cls),
+      subjectName: getSubjectNameFromCourse(slot.code, slot.absentTeacherGroup),
+      shortDate,
     };
   });
 }

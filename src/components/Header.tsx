@@ -1,6 +1,6 @@
 import React from "react";
 import { CalendarCheck, Table2, Users, Database, Moon, Sun } from "lucide-react";
-import { SCHOOL_LOGO } from "../data/logo";
+import { LEFT_SCHOOL_LOGO_URL } from "../utils/exportDoc";
 
 export type ActiveTab = "planner" | "timetables" | "free-finder" | "database";
 
@@ -27,7 +27,7 @@ export const Header: React.FC<HeaderProps> = ({
           <div className="flex items-center gap-2.5 sm:gap-3.5 min-w-0 flex-1">
             <img
               id="lg"
-              src={SCHOOL_LOGO}
+              src={LEFT_SCHOOL_LOGO_URL}
               alt="ตราโรงเรียนวรคุณอุปถัมภ์"
               referrerPolicy="no-referrer"
               className="h-11 sm:h-14 w-auto object-contain shrink-0"
@@ -36,8 +36,8 @@ export const Header: React.FC<HeaderProps> = ({
               <h1 className="text-[15px] sm:text-xl md:text-2xl font-bold leading-tight tracking-tight text-white">
                 ระบบจัดสอนแทน โรงเรียนวรคุณอุปถัมภ์
               </h1>
-              <p className="text-[11.5px] sm:text-sm text-blue-100/90 leading-snug mt-0.5">
-                ภาคเรียนที่ 2 ปีการศึกษา 2569 · ข้อมูลในระบบ {teacherCount} ท่าน · ซิงก์อัตโนมัติทุกคน
+              <p className="text-[12px] sm:text-xs text-blue-100/80 leading-snug mt-0.5">
+                ภาคเรียนที่ 2 ปีการศึกษา 2569
               </p>
             </div>
           </div>
@@ -72,50 +72,50 @@ export const Header: React.FC<HeaderProps> = ({
             <button
               type="button"
               onClick={() => onSelectTab("planner")}
-              className={`flex items-center justify-center gap-1.5 px-2.5 sm:px-3.5 py-1.5 rounded-md text-xs sm:text-sm md:text-base font-bold transition-colors whitespace-nowrap cursor-pointer ${
+              className={`flex items-center justify-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-md text-xs sm:text-sm font-semibold transition-colors whitespace-nowrap cursor-pointer ${
                 activeTab === "planner"
                   ? "bg-[#f2c230] text-[#091536] shadow-xs"
                   : "text-white/90 hover:text-white hover:bg-blue-800/60"
               }`}
             >
-              <CalendarCheck className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
-              <span>จัดครูสอนแทน</span>
+              <CalendarCheck className="w-3.5 h-3.5 shrink-0" />
+              <span>จัดสอนแทน</span>
             </button>
             <button
               type="button"
               onClick={() => onSelectTab("timetables")}
-              className={`flex items-center justify-center gap-1.5 px-2.5 sm:px-3.5 py-1.5 rounded-md text-xs sm:text-sm md:text-base font-bold transition-colors whitespace-nowrap cursor-pointer ${
+              className={`flex items-center justify-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-md text-xs sm:text-sm font-semibold transition-colors whitespace-nowrap cursor-pointer ${
                 activeTab === "timetables"
                   ? "bg-[#f2c230] text-[#091536] shadow-xs"
                   : "text-white/90 hover:text-white hover:bg-blue-800/60"
               }`}
             >
-              <Table2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
-              <span>ตารางสอนรวม</span>
+              <Table2 className="w-3.5 h-3.5 shrink-0" />
+              <span>ตารางสอน</span>
             </button>
             <button
               type="button"
               onClick={() => onSelectTab("free-finder")}
-              className={`flex items-center justify-center gap-1.5 px-2.5 sm:px-3.5 py-1.5 rounded-md text-xs sm:text-sm md:text-base font-bold transition-colors whitespace-nowrap cursor-pointer ${
+              className={`flex items-center justify-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-md text-xs sm:text-sm font-semibold transition-colors whitespace-nowrap cursor-pointer ${
                 activeTab === "free-finder"
                   ? "bg-[#f2c230] text-[#091536] shadow-xs"
                   : "text-white/90 hover:text-white hover:bg-blue-800/60"
               }`}
             >
-              <Users className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
+              <Users className="w-3.5 h-3.5 shrink-0" />
               <span>เช็คครูว่าง</span>
             </button>
             <button
               type="button"
               onClick={() => onSelectTab("database")}
-              className={`flex items-center justify-center gap-1.5 px-2.5 sm:px-3.5 py-1.5 rounded-md text-xs sm:text-sm md:text-base font-bold transition-colors whitespace-nowrap cursor-pointer ${
+              className={`flex items-center justify-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-md text-xs sm:text-sm font-semibold transition-colors whitespace-nowrap cursor-pointer ${
                 activeTab === "database"
                   ? "bg-[#f2c230] text-[#091536] shadow-xs"
                   : "text-white/90 hover:text-white hover:bg-blue-800/60"
               }`}
             >
-              <Database className="w-3.5 h-3.5 sm:w-4 sm:h-4 shrink-0" />
-              <span>จัดการฐานข้อมูล</span>
+              <Database className="w-3.5 h-3.5 shrink-0" />
+              <span>ฐานข้อมูล</span>
             </button>
           </nav>
 

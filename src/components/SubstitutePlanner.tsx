@@ -15,21 +15,27 @@ import {
   UserPlus,
   Users,
 } from "lucide-react";
-import { SCHOOL_LOGO } from "../data/logo";
 import { DAYS, DEPARTMENT_GROUPS, TeacherRecord } from "../data/teachers";
 import {
   buildCombinedDocumentRows,
   buildCombinedTeacherHeader,
+  formatClassLevelLabel,
+  formatCleanSubstituteName,
   formatRoomLabel,
+  formatShortThaiDate,
   formatThaiDate,
+  formatThaiMonthYearHeader,
   getCandidateTeachers,
   getCombinedTeacherClasses,
   getDayIndex,
   getSlotAssignment,
+  getSubjectNameFromCourse,
   getTeacherById,
   getTeacherClasses,
 } from "../utils/scheduler";
 import {
+  LEFT_SCHOOL_LOGO_URL,
+  RIGHT_OBEC_LOGO_URL,
   exportSubstituteDocument,
   renderPaperToCanvas,
 } from "../utils/exportDoc";
@@ -288,15 +294,15 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
         {/* เลือกครูหลัก (#ta) */}
         <label
           htmlFor="ta"
-          className="block font-semibold text-[#0f2150] dark:text-[#e9eefc] mb-1"
+          className="block text-sm font-semibold text-[#0f2150] dark:text-[#e9eefc] mb-1"
         >
-          ครูที่ไม่สามารถสอนได้ (ครูประจำ {regularTeachers.length} ท่าน · นศ.ฝึกสอน {studentTeachers.length} ท่าน)
+          ครูที่ลา
         </label>
         <select
           id="ta"
           value={primaryTeacherId}
           onChange={(e) => onChangePrimaryTeacherId(e.target.value)}
-          className="w-full max-w-full px-3 py-2 rounded-lg border border-[#c9d4ec] dark:border-[#2a3a6e] bg-white dark:bg-[#0b1330] text-[#0f2150] dark:text-[#e9eefc] font-medium focus:outline-2 focus:outline-[#f2c230]"
+          className="w-full max-w-full px-3 py-2 rounded-lg border border-[#c9d4ec] dark:border-[#2a3a6e] bg-white dark:bg-[#0b1330] text-[#0f2150] dark:text-[#e9eefc] text-sm font-medium focus:outline-2 focus:outline-[#f2c230]"
         >
           <option value="">— เลือกครูผู้สอน —</option>
           {DEPARTMENT_GROUPS.map((group) => {
@@ -306,42 +312,27 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
               <optgroup key={group} label={`กลุ่มสาระ/งาน: ${group}`}>
                 {groupTeachers.map((t) => (
                   <option key={t.id} value={String(t.id)}>
-                    {t.id} {t.n} ({t.pdfGroup} · {formatRoomLabel(t.r)})
+                    {t.id} {t.n} ({t.pdfGroup})
                   </option>
                 ))}
               </optgroup>
             );
           })}
           {studentTeachers.length > 0 && (
-            <optgroup label={`นักศึกษาฝึกสอน (${studentTeachers.length} ท่าน)`}>
+            <optgroup label="นักศึกษาฝึกสอน">
               {studentTeachers.map((t) => (
                 <option key={t.id} value={String(t.id)}>
-                  {t.id} {t.n} (นศ.ฝึกสอน · {t.pdfGroup} - {formatRoomLabel(t.r)})
+                  {t.id} {t.n} (นศ.ฝึกสอน · {t.pdfGroup})
                 </option>
               ))}
             </optgroup>
           )}
         </select>
 
-        {/* ส่วนเพิ่มครูที่ลาเพิ่มเติมลงในตารางเดียวกัน (รวมอยู่ในใบเดียวกัน ไม่แยกตาราง) */}
-        <div className="mt-2.5 p-3 rounded-xl bg-[#eaf0fa]/70 dark:bg-[#0b1330]/80 border border-[#c9d4ec] dark:border-[#2a3a6e]">
-          <div className="flex items-center justify-between gap-2 mb-2">
-            <div className="flex items-center gap-1.5 text-xs sm:text-sm font-bold text-[#0f2150] dark:text-[#e9eefc]">
-              <Users className="w-4 h-4 text-[#1b4fb8] dark:text-[#6c97ff] shrink-0" />
-              <span>
-                ครูที่ลาในตารางนี้ ({selectedAbsentTeachers.length} ท่าน)
-              </span>
-            </div>
-            {addingTeacherPickerOpen && (
-              <span className="text-[11px] font-semibold text-[#1b4fb8] dark:text-[#6c97ff]">
-                รวมในตารางเดียวกัน
-              </span>
-            )}
-          </div>
-
-          {/* แสดงรายชื่อครูทุกคนที่รวมอยู่ในตารางใบสอนแทนนี้ */}
+        {/* ส่วนเพิ่มครูที่ลาเพิ่มเติมลงในตารางเดียวกัน (มินิมอล ไม่รก) */}
+        <div className="mt-2 p-2 rounded-lg bg-[#eaf0fa]/50 dark:bg-[#0b1330]/50 border border-[#c9d4ec] dark:border-[#2a3a6e]">
           {selectedAbsentTeachers.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 mb-2.5">
+            <div className="flex flex-wrap gap-1 mb-1.5">
               {selectedAbsentTeachers.map((t) => {
                 const tClasses = getTeacherClasses(
                   t.id,
@@ -349,36 +340,35 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                   includeSupervision
                 );
                 return (
-                  <div
+                  <span
                     key={t.id}
-                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white dark:bg-[#14204a] border border-[#c9d4ec] dark:border-[#2a3a6e] text-xs font-semibold text-[#0f2150] dark:text-[#e9eefc]"
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-white dark:bg-[#14204a] border border-[#c9d4ec] dark:border-[#2a3a6e] text-xs font-medium text-[#0f2150] dark:text-[#e9eefc]"
                   >
                     <span className="text-[#1b4fb8] dark:text-[#6c97ff] font-bold">
                       {t.id}
                     </span>
                     <span>{t.n}</span>
-                    <span className="text-[#51608a] dark:text-[#9fb0dc] font-normal">
+                    <span className="text-neutral-400 text-[11px]">
                       ({tClasses.length} คาบ)
                     </span>
                     {selectedAbsentTeachers.length > 1 && (
                       <button
                         type="button"
-                        title={`นำ ${t.n} ออกจากตาราง`}
+                        title={`นำ ${t.n} ออก`}
                         onClick={() => onRemoveAbsentTeacher(String(t.id))}
-                        className="ml-0.5 p-0.5 rounded hover:bg-red-100 dark:hover:bg-red-950 text-red-600 dark:text-red-400 cursor-pointer"
+                        className="p-0.5 rounded hover:bg-red-100 dark:hover:bg-red-950 text-red-500 cursor-pointer"
                       >
-                        <X className="w-3.5 h-3.5" />
+                        <X className="w-3 h-3" />
                       </button>
                     )}
-                  </div>
+                  </span>
                 );
               })}
             </div>
           )}
 
-          {/* เลือกเพิ่มครูที่ลาคนที่ 2, 3... ลงในตารางเดียวกันได้ทันทีในขั้นตอนเดียว */}
           <div className="flex items-center gap-1.5">
-            <UserPlus className="w-4 h-4 text-[#1b4fb8] dark:text-[#6c97ff] shrink-0" />
+            <UserPlus className="w-3.5 h-3.5 text-[#1b4fb8] dark:text-[#6c97ff] shrink-0" />
             <select
               id="add-teacher-select"
               aria-label="เลือกครูที่ลาเพิ่มเติมในตารางเดียวกัน"
@@ -389,10 +379,10 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                   setAddingTeacherPickerOpen(true);
                 }
               }}
-              className="w-full px-2.5 py-1.5 rounded-lg border border-[#1b4fb8]/50 dark:border-[#6c97ff]/50 bg-white dark:bg-[#14204a] text-[#0f2150] dark:text-[#e9eefc] text-xs sm:text-sm font-semibold focus:outline-2 focus:outline-[#f2c230]"
+              className="w-full px-2 py-1 rounded-md border border-[#c9d4ec] dark:border-[#2a3a6e] bg-white dark:bg-[#14204a] text-[#0f2150] dark:text-[#e9eefc] text-xs font-medium focus:outline-2 focus:outline-[#f2c230]"
             >
               <option value="">
-                + เพิ่มครูที่ลาคนอื่นลงในตารางเดียวกัน (กรณีลาพร้อมกันมากกว่า 1 ท่าน)...
+                + เพิ่มครูที่ลาในตารางเดียวกัน...
               </option>
               {DEPARTMENT_GROUPS.map((group) => {
                 const groupTeachers = availableTeachersToAdd.filter(
@@ -422,20 +412,14 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
               )}
             </select>
           </div>
-
-          {selectedAbsentTeachers.length > 1 && (
-            <p className="text-[11px] text-[#1b4fb8] dark:text-[#6c97ff] mt-2 mb-0 font-medium">
-              ✓ รวมคาบสอนของครูทั้ง {selectedAbsentTeachers.length} ท่านไว้ในตารางเดียวกันและใบเดียวกัน พร้อมป้องกันคนสอนแทนซ้ำกันในคาบเดียวกันอัตโนมัติ
-            </p>
-          )}
         </div>
 
         {/* เลือกวันที่ */}
         <label
           htmlFor="dt"
-          className="block font-semibold text-[#0f2150] dark:text-[#e9eefc] mt-3.5 mb-1"
+          className="block text-sm font-semibold text-[#0f2150] dark:text-[#e9eefc] mt-3 mb-1"
         >
-          วันที่สอนแทน
+          วันที่
         </label>
         <input
           type="date"
@@ -466,7 +450,7 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
         {/* เหตุผล / ภารกิจ */}
         <label
           htmlFor="wy"
-          className="block font-semibold text-[#0f2150] dark:text-[#e9eefc] mt-3.5 mb-1"
+          className="block text-sm font-semibold text-[#0f2150] dark:text-[#e9eefc] mt-3 mb-1"
         >
           เหตุผล / ภารกิจ
         </label>
@@ -476,17 +460,17 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
           value={reason}
           onChange={(e) => onChangeReason(e.target.value)}
           placeholder="เช่น ไปราชการ, อบรม, ลากิจ"
-          className="w-full px-3 py-2 rounded-lg border border-[#c9d4ec] dark:border-[#2a3a6e] bg-white dark:bg-[#0b1330] text-[#0f2150] dark:text-[#e9eefc] focus:outline-2 focus:outline-[#f2c230]"
+          className="w-full px-3 py-1.5 text-sm rounded-lg border border-[#c9d4ec] dark:border-[#2a3a6e] bg-white dark:bg-[#0b1330] text-[#0f2150] dark:text-[#e9eefc] focus:outline-2 focus:outline-[#f2c230]"
         />
-        <div className="flex flex-wrap gap-1.5 mt-1.5">
+        <div className="flex flex-wrap gap-1 mt-1.5">
           {REASON_PRESETS.map((preset) => (
             <button
               key={preset}
               type="button"
               onClick={() => onChangeReason(preset)}
-              className={`px-2 py-0.5 rounded text-xs font-medium transition-colors cursor-pointer ${
+              className={`px-2 py-0.5 rounded text-xs transition-colors cursor-pointer ${
                 reason === preset
-                  ? "bg-[#1b4fb8] text-white"
+                  ? "bg-[#1b4fb8] text-white font-medium"
                   : "bg-[#eaf0fa] dark:bg-[#0b1330] text-[#51608a] dark:text-[#9fb0dc] hover:text-[#0f2150]"
               }`}
             >
@@ -495,34 +479,23 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
           ))}
         </div>
 
-        {/* รายชื่อนักศึกษาฝึกสอนในระบบ + ช่องระบุชื่อเพิ่มเติมกรณีอื่นๆ */}
-        <div className="mt-3.5 p-2.5 rounded-lg bg-[#eaf0fa]/60 dark:bg-[#0b1330]/60 border border-[#c9d4ec] dark:border-[#2a3a6e] text-xs text-[#0f2150] dark:text-[#e9eefc]">
-          <div className="font-semibold text-[#1b4fb8] dark:text-[#6c97ff] mb-1">
-            นักศึกษาฝึกสอนในระบบ (เช็คตารางว่างรายคาบอัตโนมัติ):
-          </div>
-          <div className="grid grid-cols-1 gap-0.5 text-[#51608a] dark:text-[#9fb0dc]">
-            {studentTeachers.map((st) => (
-              <div key={st.id}>
-                • <b>{st.id} {st.n}</b> ({st.pdfGroup} · {formatRoomLabel(st.r)})
-              </div>
-            ))}
-          </div>
+        {/* ช่องระบุชื่อ นศ.ฝึกสอน เพิ่มเติมกรณีระบุเอง (กะทัดรัด) */}
+        <div className="mt-2.5">
+          <label
+            htmlFor="sn"
+            className="block text-xs text-[#51608a] dark:text-[#9fb0dc] mb-1"
+          >
+            ชื่อ นศ.ฝึกสอน (กรณีระบุเอง)
+          </label>
+          <input
+            type="text"
+            id="sn"
+            value={studentTeacherName}
+            onChange={(e) => onChangeStudentTeacherName(e.target.value)}
+            placeholder="พิมพ์ชื่อหากต้องการระบุเอง"
+            className="w-full px-2.5 py-1 text-xs rounded-md border border-[#c9d4ec] dark:border-[#2a3a6e] bg-white dark:bg-[#0b1330] text-[#0f2150] dark:text-[#e9eefc] focus:outline-2 focus:outline-[#f2c230]"
+          />
         </div>
-
-        <label
-          htmlFor="sn"
-          className="block font-semibold text-[#0f2150] dark:text-[#e9eefc] mt-3 mb-1 text-sm"
-        >
-          ระบุชื่อนักศึกษาฝึกสอนท่านอื่นเพิ่มเติม (กรณีเลือก "นักศึกษาฝึกสอน (ระบุชื่อเอง)")
-        </label>
-        <input
-          type="text"
-          id="sn"
-          value={studentTeacherName}
-          onChange={(e) => onChangeStudentTeacherName(e.target.value)}
-          placeholder="เช่น นายสมชาย ใจดี (กรณีไม่ได้อยู่ในรายชื่อข้างต้น)"
-          className="w-full px-3 py-1.5 rounded-lg border border-[#c9d4ec] dark:border-[#2a3a6e] bg-white dark:bg-[#0b1330] text-[#0f2150] dark:text-[#e9eefc] text-sm focus:outline-2 focus:outline-[#f2c230]"
-        />
 
         {/* ตัวเลือกเสริมสำหรับฝ่ายบริหารที่มีคาบนิเทศสอน */}
         {hasSupervisionSlots && (
@@ -710,14 +683,6 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                       </optgroup>
                     </select>
 
-                    {noSameGroupRegular && (
-                      <small className="text-xs text-amber-700 dark:text-amber-300">
-                        ไม่มีครูประจำกลุ่มสาระ{slot.absentTeacherGroup}ว่างในคาบนี้{" "}
-                        {freeStudentTeachers.length > 0
-                          ? `(ระบบเลือกนักศึกษาฝึกสอนที่ว่างให้อัตโนมัติ หรือเลือกครูต่างกลุ่มสาระได้)`
-                          : `(สามารถเลือกครูต่างกลุ่มสาระหรือระบุชื่อนักศึกษาฝึกสอนได้)`}
-                      </small>
-                    )}
                   </div>
                 );
               })}
@@ -725,66 +690,66 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
           )}
         </div>
 
-        {/* ปุ่มจัดอัตโนมัติใหม่ & สถานะบันทึกอัตโนมัติลงฐานข้อมูลกลาง */}
+        {/* ปุ่มจัดอัตโนมัติ & สถานะบันทึก */}
         <div className="flex flex-wrap items-center gap-2 mt-4">
           <button
             type="button"
             id="au"
             onClick={onResetAutoAssign}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg border border-[#1b4fb8] dark:border-[#6c97ff] text-[#1b4fb8] dark:text-[#6c97ff] hover:bg-[#1b4fb8] hover:text-white font-semibold text-sm sm:text-base transition-colors cursor-pointer"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#1b4fb8] dark:border-[#6c97ff] text-[#1b4fb8] dark:text-[#6c97ff] hover:bg-[#1b4fb8] hover:text-white font-medium text-xs sm:text-sm transition-colors cursor-pointer"
           >
-            <RefreshCw className="w-4 h-4 shrink-0" />
-            <span>จัดอัตโนมัติใหม่</span>
+            <RefreshCw className="w-3.5 h-3.5 shrink-0" />
+            <span>จัดอัตโนมัติ</span>
           </button>
 
           <button
             type="button"
             disabled={!canExport || isSavingRecord}
             onClick={handleSaveToDatabase}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[#0b7a4b] hover:bg-[#085c38] disabled:opacity-40 text-white font-semibold text-sm sm:text-base transition-colors cursor-pointer"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#0b7a4b] hover:bg-[#085c38] disabled:opacity-40 text-white font-medium text-xs sm:text-sm transition-colors cursor-pointer"
           >
-            <Save className="w-4 h-4 shrink-0" />
-            <span>{isSavingRecord ? "กำลังบันทึก..." : "บันทึกเก็บในประวัติ"}</span>
+            <Save className="w-3.5 h-3.5 shrink-0" />
+            <span>{isSavingRecord ? "กำลังบันทึก..." : "บันทึกประวัติ"}</span>
           </button>
 
           <span
             id="autosave-badge"
-            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 text-xs font-bold text-[#0b7a4b] dark:text-[#4fd39a]"
+            className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 text-xs text-[#0b7a4b] dark:text-[#4fd39a]"
           >
             {autoSaveState === "saving"
-              ? "กำลังบันทึกอัตโนมัติ..."
-              : "✓ บันทึกอัตโนมัติแล้ว (เห็นตรงกันทุกคน)"}
+              ? "กำลังบันทึก..."
+              : "✓ ซิงก์ข้อมูลแล้ว"}
           </span>
         </div>
 
         {/* รายการใบสอนแทนที่บันทึกไว้ล่าสุด */}
         {savedRecords.length > 0 && (
-          <div className="mt-4 pt-3 border-t border-[#c9d4ec] dark:border-[#2a3a6e]">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-xs font-bold text-[#0f2150] dark:text-[#e9eefc]">
-                ใบสอนแทนที่บันทึกไว้ในฐานข้อมูล ({savedRecords.length})
+          <div className="mt-3.5 pt-2.5 border-t border-[#c9d4ec] dark:border-[#2a3a6e]">
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-xs font-semibold text-[#0f2150] dark:text-[#e9eefc]">
+                บันทึกไว้ล่าสุด ({savedRecords.length})
               </span>
               <button
                 type="button"
                 onClick={onOpenDatabaseTab}
-                className="text-xs font-semibold text-[#1b4fb8] dark:text-[#6c97ff] hover:underline cursor-pointer"
+                className="text-xs text-[#1b4fb8] dark:text-[#6c97ff] hover:underline cursor-pointer"
               >
-                จัดการทั้งหมด
+                ดูทั้งหมด
               </button>
             </div>
-            <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
-              {savedRecords.slice(0, 5).map((rec) => (
+            <div className="space-y-1 max-h-36 overflow-y-auto pr-1">
+              {savedRecords.slice(0, 4).map((rec) => (
                 <div
                   key={rec.recordId}
-                  className="flex items-center justify-between gap-2 p-2 rounded-lg bg-[#eaf0fa]/60 dark:bg-[#0b1330]/60 border border-[#c9d4ec] dark:border-[#2a3a6e] text-xs"
+                  className="flex items-center justify-between gap-2 p-1.5 rounded-md bg-[#eaf0fa]/60 dark:bg-[#0b1330]/60 border border-[#c9d4ec] dark:border-[#2a3a6e] text-xs"
                 >
                   <div className="min-w-0 truncate">
-                    <span className="font-bold text-[#0f2150] dark:text-[#e9eefc]">
+                    <span className="font-medium text-[#0f2150] dark:text-[#e9eefc]">
                       {/^\d{3}\s/.test(rec.absentTeacherName)
                         ? rec.absentTeacherName
                         : `${rec.absentTeacherId} ${rec.absentTeacherName}`}
                     </span>{" "}
-                    <span className="text-[#51608a] dark:text-[#9fb0dc]">
+                    <span className="text-[#51608a] dark:text-[#9fb0dc] text-[11px]">
                       · {formatThaiDate(rec.selectedDate)}
                     </span>
                   </div>
@@ -793,7 +758,7 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                       type="button"
                       onClick={() => onLoadSavedRecord(rec)}
                       title="โหลดมาแก้ไข"
-                      className="px-2 py-1 rounded bg-[#1b4fb8] text-white font-semibold flex items-center gap-1 cursor-pointer"
+                      className="px-2 py-0.5 rounded bg-[#1b4fb8] text-white text-xs font-medium flex items-center gap-1 cursor-pointer"
                     >
                       <FolderOpen className="w-3 h-3" />
                       <span>เปิด</span>
@@ -801,10 +766,10 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                     <button
                       type="button"
                       onClick={() => onDeleteSavedRecord(rec.recordId)}
-                      title="ลบใบสอนแทนนี้"
-                      className="p-1 rounded text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-950/60 cursor-pointer"
+                      title="ลบ"
+                      className="p-1 rounded text-red-500 hover:bg-red-100 dark:hover:bg-red-950/60 cursor-pointer"
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
+                      <Trash2 className="w-3 h-3" />
                     </button>
                   </div>
                 </div>
@@ -812,82 +777,75 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
             </div>
           </div>
         )}
-
-        <p className="text-sm text-[#51608a] dark:text-[#9fb0dc] mt-3 mb-0 leading-relaxed">
-          หลักการ: จัดครูประจำกลุ่มสาระเดียวกันที่ว่างก่อน (★) โดยเกลี่ยคาบให้สมดุลและไม่ซ้ำคนในคาบเดียวกันเมื่อมีครูลาหลายท่านในตารางเดียวกัน หากไม่มีครูในกลุ่มสาระว่าง ระบบจะจัดนักศึกษาฝึกสอนที่ว่างในคาบนั้นให้อัตโนมัติ
-        </p>
       </section>
 
       {/* แผงแสดงตัวอย่างเอกสารใบสอนแทน (A4) ด้านขวา */}
-      <section className="min-w-0 w-full bg-white dark:bg-[#14204a] border border-[#c9d4ec] dark:border-[#2a3a6e] rounded-xl p-4 sm:p-5 shadow-xs">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-3 print:hidden">
-          <div>
-            <h2 className="text-xl font-bold text-[#0f2150] dark:text-[#e9eefc]">
-              ตัวอย่างเอกสารใบสอนแทน
+      <section className="min-w-0 w-full bg-white dark:bg-[#14204a] border border-[#c9d4ec] dark:border-[#2a3a6e] rounded-xl p-3 sm:p-5 shadow-xs">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 mb-3 print:hidden">
+          <div className="flex items-center gap-2">
+            <h2 className="text-base sm:text-lg font-bold text-[#0f2150] dark:text-[#e9eefc]">
+              แบบบันทึกการจัดสอนแทน
             </h2>
             {selectedAbsentTeachers.length > 1 && (
-              <p className="text-xs font-semibold text-[#1b4fb8] dark:text-[#6c97ff] mt-0.5">
-                ตารางรวมครูที่ลา {selectedAbsentTeachers.length} ท่าน ({docRows.length} คาบเรียน) ในใบเดียวกัน
-              </p>
+              <span className="text-xs px-2 py-0.5 rounded bg-blue-100 dark:bg-blue-950 text-[#1b4fb8] dark:text-[#6c97ff] font-medium">
+                รวม {selectedAbsentTeachers.length} ท่าน
+              </span>
             )}
           </div>
-          <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-2">
+          <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-1.5">
             <button
               type="button"
               id="bw"
               disabled={!canExport || isExporting}
               onClick={() => handleExport("word")}
-              className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-[#1b4fb8] hover:bg-[#153e91] disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold text-sm sm:text-base transition-colors cursor-pointer whitespace-nowrap"
+              className="flex items-center justify-center gap-1 px-3 py-1.5 rounded-md bg-[#1b4fb8] hover:bg-[#153e91] disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs sm:text-sm font-medium transition-colors cursor-pointer whitespace-nowrap"
             >
-              <FileText className="w-4 h-4 shrink-0" />
-              <span>ดาวน์โหลด Word</span>
+              <FileText className="w-3.5 h-3.5 shrink-0" />
+              <span>Word</span>
             </button>
             <button
               type="button"
               id="bp"
               disabled={!canExport || isExporting}
               onClick={() => handleExport("pdf")}
-              className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg bg-[#1b4fb8] hover:bg-[#153e91] disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold text-sm sm:text-base transition-colors cursor-pointer whitespace-nowrap"
+              className="flex items-center justify-center gap-1 px-3 py-1.5 rounded-md bg-[#1b4fb8] hover:bg-[#153e91] disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs sm:text-sm font-medium transition-colors cursor-pointer whitespace-nowrap"
             >
-              <FileDown className="w-4 h-4 shrink-0" />
-              <span>ดาวน์โหลด PDF</span>
+              <FileDown className="w-3.5 h-3.5 shrink-0" />
+              <span>PDF</span>
             </button>
             <button
               type="button"
               id="bi"
               disabled={!canExport || isExporting}
               onClick={() => handleExport("image")}
-              className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-[#1b4fb8] dark:border-[#6c97ff] text-[#1b4fb8] dark:text-[#6c97ff] hover:bg-[#eaf0fa] dark:hover:bg-blue-950 disabled:opacity-40 disabled:cursor-not-allowed font-semibold text-sm sm:text-base transition-colors cursor-pointer whitespace-nowrap"
+              className="flex items-center justify-center gap-1 px-3 py-1.5 rounded-md border border-[#1b4fb8] dark:border-[#6c97ff] text-[#1b4fb8] dark:text-[#6c97ff] hover:bg-[#eaf0fa] dark:hover:bg-blue-950 disabled:opacity-40 disabled:cursor-not-allowed text-xs sm:text-sm font-medium transition-colors cursor-pointer whitespace-nowrap"
             >
-              <ImageIcon className="w-4 h-4 shrink-0" />
-              <span>ดาวน์โหลดรูปภาพ</span>
+              <ImageIcon className="w-3.5 h-3.5 shrink-0" />
+              <span>รูปภาพ</span>
             </button>
             <button
               type="button"
               disabled={!canExport || isExporting}
               onClick={handlePrint}
-              className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-[#c9d4ec] dark:border-[#2a3a6e] text-[#0f2150] dark:text-[#e9eefc] hover:bg-slate-100 dark:hover:bg-blue-950 disabled:opacity-40 disabled:cursor-not-allowed font-semibold text-sm sm:text-base transition-colors cursor-pointer whitespace-nowrap"
+              className="flex items-center justify-center gap-1 px-3 py-1.5 rounded-md border border-[#c9d4ec] dark:border-[#2a3a6e] text-[#0f2150] dark:text-[#e9eefc] hover:bg-slate-100 dark:hover:bg-blue-950 disabled:opacity-40 disabled:cursor-not-allowed text-xs sm:text-sm font-medium transition-colors cursor-pointer whitespace-nowrap"
             >
-              <Printer className="w-4 h-4 shrink-0" />
+              <Printer className="w-3.5 h-3.5 shrink-0" />
               <span>พิมพ์</span>
             </button>
           </div>
         </div>
 
-        {/* คำแนะนำสำหรับผู้ใช้ iPhone / iPad หรือเปิดผ่านแอป Messenger / LINE */}
+        {/* แถบย่อสำหรับ iOS / ขยายเต็มจอ */}
         {previewDataUrl && (
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-2 px-3 py-2 rounded-lg bg-[#eaf0fa]/80 dark:bg-[#0b1330] border border-[#c9d4ec] dark:border-[#2a3a6e] text-xs text-[#0f2150] dark:text-[#e9eefc] print:hidden">
-            <span>
-              💡 <b>สำหรับ iPhone / iPad (iOS):</b> สามารถกดปุ่มดาวน์โหลดเพื่อแชร์/บันทึกไฟล์ หรือ{" "}
-              <b>กดค้างที่รูปใบสอนแทนด้านล่าง</b> เพื่อเลือก &ldquo;บันทึกรูปภาพ&rdquo; ลงเครื่องได้โดยตรง
-            </span>
+          <div className="mb-2.5 flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-md bg-[#eaf0fa]/60 dark:bg-[#0b1330]/60 border border-[#c9d4ec] dark:border-[#2a3a6e] text-xs text-[#51608a] dark:text-[#9fb0dc] print:hidden">
+            <span>iOS: กดค้างที่รูปภาพเพื่อบันทึก</span>
             <button
               type="button"
               onClick={() => setFullscreenImageOpen(true)}
-              className="flex items-center gap-1 px-2.5 py-1 rounded bg-[#1b4fb8] text-white font-semibold cursor-pointer whitespace-nowrap shrink-0"
+              className="flex items-center gap-1 px-2 py-0.5 rounded bg-[#1b4fb8] text-white font-medium cursor-pointer whitespace-nowrap text-xs shrink-0"
             >
-              <Maximize2 className="w-3.5 h-3.5" />
-              <span>ขยายเต็มจอ</span>
+              <Maximize2 className="w-3 h-3" />
+              <span>ขยาย</span>
             </button>
           </div>
         )}
@@ -908,26 +866,34 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
           </div>
         )}
 
-        {/* กระดาษ A4 ตัวอย่างใบสอนแทน (ปรับย่อ-ขยายอัตโนมัติทุกขนาดหน้าจอ ไม่เพี้ยนทุกเครื่อง) */}
+        {/* กระดาษ A4 แนวนอน ตัวอย่างแบบบันทึกการจัดสอนแทน (รูปแบบตามภาพที่ 1 เป๊ะ 100%) */}
         <div className="bg-slate-100 dark:bg-[#0b1330] p-2 sm:p-4 md:p-5 rounded-lg border border-[#c9d4ec] dark:border-[#2a3a6e] print:p-0 print:bg-white print:border-0">
           <div
             id="paper"
             ref={paperRef}
-            className="paper-sheet w-full max-w-[794px] bg-white text-black mx-auto shadow-md print:shadow-none relative overflow-hidden"
+            className="paper-sheet w-full max-w-[1123px] bg-white text-black mx-auto shadow-md print:shadow-none relative overflow-hidden"
           >
             {!combinedHeaderTeacher || dayIdx < 0 || docRows.length === 0 ? (
-              <div className="text-center py-36 px-6 text-neutral-500 min-h-[640px] flex flex-col items-center justify-center">
-                <img
-                  src={SCHOOL_LOGO}
-                  alt="ตราโรงเรียน"
-                  referrerPolicy="no-referrer"
-                  className="h-[84px] mx-auto mb-4 opacity-50"
-                />
+              <div className="text-center py-32 px-6 text-neutral-500 min-h-[540px] flex flex-col items-center justify-center">
+                <div className="flex items-center justify-center gap-6 mb-4 opacity-70">
+                  <img
+                    src={LEFT_SCHOOL_LOGO_URL}
+                    alt="ตราโรงเรียนวรคุณอุปถัมภ์"
+                    referrerPolicy="no-referrer"
+                    className="h-[84px] w-auto object-contain"
+                  />
+                  <img
+                    src={RIGHT_OBEC_LOGO_URL}
+                    alt="ตราองค์กรหมายเลข 1"
+                    referrerPolicy="no-referrer"
+                    className="h-[78px] w-auto object-contain"
+                  />
+                </div>
                 <p className="text-xl font-semibold">
-                  เลือกครูและวันที่ที่มีคาบสอน เพื่อแสดงตัวอย่างใบสอนแทน
+                  เลือกครูและวันที่ที่มีคาบสอน เพื่อแสดงแบบบันทึกการจัดสอนแทน
                 </p>
                 <p className="text-base mt-1">
-                  โรงเรียนวรคุณอุปถัมภ์ · ภาคเรียนที่ 2 ปีการศึกษา 2569
+                  โรงเรียนวรคุณอุปถัมภ์ · {formatThaiMonthYearHeader(selectedDate)}
                 </p>
               </div>
             ) : (
@@ -935,63 +901,135 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                 {previewDataUrl && (
                   <img
                     src={previewDataUrl}
-                    alt="ตัวอย่างเอกสารใบสอนแทน A4 โรงเรียนวรคุณอุปถัมภ์"
+                    alt="ตัวอย่างแบบบันทึกการจัดสอนแทน โรงเรียนวรคุณอุปถัมภ์"
                     className="w-full h-auto block"
                   />
                 )}
-                {/* โครงสร้างตาราง Semantic สำหรับ Screen Reader และการค้นหาข้อความ */}
+                {/* โครงสร้างตาราง Semantic 10 คอลัมน์ตามภาพที่ 1 สำหรับ Screen Reader และการค้นหาข้อความ */}
                 <div
                   className={
                     previewDataUrl
                       ? "sr-only"
-                      : "px-[44px] py-[48px] text-[18px] leading-[1.35]"
+                      : "px-[36px] py-[32px] text-[15px] leading-[1.35]"
                   }
                 >
-                  <div className="text-center">
-                    <h3>โรงเรียนวรคุณอุปถัมภ์</h3>
-                    <h4>
-                      ตารางสอนแทน ภาคเรียนที่ 2 ปีการศึกษา 2569 กลุ่ม/ฝ่าย/งาน{" "}
-                      {combinedHeaderTeacher.pdfGroup}
-                    </h4>
+                  <div className="flex items-center justify-between gap-4 mb-4">
+                    <img
+                      src={LEFT_SCHOOL_LOGO_URL}
+                      alt="ตราโรงเรียนวรคุณอุปถัมภ์"
+                      className="h-[88px] w-auto object-contain"
+                    />
+                    <div className="text-center">
+                      <h3 className="text-[20px] font-bold">แบบบันทึกการจัดสอนแทน</h3>
+                      <h4 className="text-[19px] font-bold mt-2">
+                        {formatThaiMonthYearHeader(selectedDate)}
+                      </h4>
+                    </div>
+                    <img
+                      src={RIGHT_OBEC_LOGO_URL}
+                      alt="ตราองค์กรหมายเลข 1"
+                      className="h-[82px] w-auto object-contain"
+                    />
                   </div>
-                  <p>
-                    ครูผู้สอน{" "}
-                    {/^\d{3}\s/.test(combinedHeaderTeacher.n)
-                      ? combinedHeaderTeacher.n
-                      : `${combinedHeaderTeacher.id} ${combinedHeaderTeacher.n}`}{" "}
-                    วัน{DAYS[dayIdx]}ที่ {formatThaiDate(selectedDate)}
-                  </p>
-                  <p>
-                    ไม่สามารถปฏิบัติการสอนได้เนื่องจาก {reason || "-"} จึงมอบหมายให้สอนแทนดังนี้
-                  </p>
-                  <table>
+                  <table className="w-full border-collapse border border-black text-[15px]">
                     <thead>
                       <tr>
-                        <th>คาบที่</th>
-                        <th>เวลา</th>
-                        <th>รหัสวิชา</th>
-                        <th>ชั้น</th>
-                        <th>ห้องเรียน</th>
-                        <th>ผู้สอนแทน</th>
-                        <th>กลุ่มสาระ</th>
-                        <th>ลายมือชื่อ</th>
+                        <th className="border border-black px-2 py-1.5 text-center font-bold">ที่</th>
+                        <th className="border border-black px-2.5 py-1.5 text-center font-bold">
+                          ชื่อ-สกุล ผู้สอนแทน
+                        </th>
+                        <th className="border border-black px-2.5 py-1.5 text-center font-bold">
+                          สอนแทน
+                        </th>
+                        <th className="border border-black px-2 py-1.5 text-center font-bold">
+                          คาบที่
+                        </th>
+                        <th className="border border-black px-2 py-1.5 text-center font-bold">
+                          ห้อง
+                        </th>
+                        <th className="border border-black px-2 py-1.5 text-center font-bold">
+                          วิชา
+                        </th>
+                        <th className="border border-black px-2 py-1.5 text-center font-bold">
+                          รหัสวิชา
+                        </th>
+                        <th className="border border-black px-2 py-1.5 text-center font-bold">
+                          วันที่
+                        </th>
+                        <th className="border border-black px-2 py-1.5 text-center font-bold">
+                          ลงชื่อ
+                        </th>
+                        <th className="border border-black px-2 py-1.5 text-center font-bold">
+                          หมายเหตุ
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
-                      {docRows.map((row, idx) => (
-                        <tr key={row.slotKey || `${row.p}-${idx}`}>
-                          <td>{row.p}</td>
-                          <td>{row.tm}</td>
-                          <td>{row.code}</td>
-                          <td>{row.cls}</td>
-                          <td>{row.room}</td>
-                          <td>{row.n}</td>
-                          <td>{row.g}</td>
-                          <td></td>
-                        </tr>
-                      ))}
+                      {docRows.map((row, idx) => {
+                        const subDisplay = row.subName || formatCleanSubstituteName(row.n);
+                        const absentDisplay = (
+                          row.absentTeacherName ||
+                          combinedHeaderTeacher.n.split(",")[0] ||
+                          ""
+                        )
+                          .replace(/^\d{3}\s+/, "")
+                          .trim();
+                        const roomClassDisplay =
+                          row.classRoomLabel || formatClassLevelLabel(row.cls);
+                        const subjectDisplay =
+                          row.subjectName ||
+                          getSubjectNameFromCourse(row.code, combinedHeaderTeacher.g);
+                        const rowShortDate =
+                          row.shortDate || formatShortThaiDate(selectedDate);
+                        const noteStr = (reason || "ไปราชการ").trim() || "ไปราชการ";
+
+                        return (
+                          <tr key={row.slotKey || `${row.p}-${idx}`}>
+                            <td className="border border-black px-2 py-1.5 text-center">
+                              {idx + 1}
+                            </td>
+                            <td className="border border-black px-2.5 py-1.5 text-left">
+                              {subDisplay}
+                            </td>
+                            <td className="border border-black px-2.5 py-1.5 text-left">
+                              {absentDisplay}
+                            </td>
+                            <td className="border border-black px-2 py-1.5 text-center">
+                              {row.p}
+                            </td>
+                            <td className="border border-black px-2 py-1.5 text-center">
+                              {roomClassDisplay}
+                            </td>
+                            <td className="border border-black px-2 py-1.5 text-center">
+                              {subjectDisplay}
+                            </td>
+                            <td className="border border-black px-2 py-1.5 text-center">
+                              {row.code}
+                            </td>
+                            <td className="border border-black px-2 py-1.5 text-center">
+                              {rowShortDate}
+                            </td>
+                            <td className="border border-black px-2 py-1.5 text-center"></td>
+                            <td className="border border-black px-2 py-1.5 text-center">
+                              {noteStr}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
+                  <div className="mt-10 flex items-stretch justify-around gap-6">
+                    <div className="border-2 border-black px-6 py-3 text-center">
+                      <p>ลงชื่อ.................................ผู้จัดสอนแทน</p>
+                      <p className="mt-1">(นายธีระพงษ์ หาวัน)</p>
+                      <p className="mt-1">งานการจัดการเรียนการสอน</p>
+                    </div>
+                    <div className="border-2 border-black px-6 py-3 text-center">
+                      <p>ลงชื่อ.................................หัวหน้ากลุ่มบริหารวิชาการ</p>
+                      <p className="mt-1">(นายสุทธิศักดิ์ เกตษา)</p>
+                      <p className="mt-1">ผู้ช่วยผู้อำนวยการโรงเรียนวรคุณอุปถัมภ์</p>
+                    </div>
+                  </div>
                 </div>
               </>
             )}
@@ -1006,7 +1044,7 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
           aria-modal="true"
           className="fixed inset-0 z-50 bg-black/85 flex flex-col items-center justify-center p-3 sm:p-6 overflow-y-auto"
         >
-          <div className="w-full max-w-[794px] flex items-center justify-between gap-2 mb-3 text-white">
+          <div className="w-full max-w-[1123px] flex items-center justify-between gap-2 mb-3 text-white">
             <span className="text-xs sm:text-sm font-semibold">
               กดค้างที่รูปภาพใบสอนแทนเพื่อเลือก &ldquo;บันทึกรูปภาพ (Save to Photos)&rdquo; บน iPhone
             </span>
@@ -1019,7 +1057,7 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
               <span>ปิด</span>
             </button>
           </div>
-          <div className="w-full max-w-[794px] bg-white rounded-lg overflow-hidden shadow-2xl">
+          <div className="w-full max-w-[1123px] bg-white rounded-lg overflow-hidden shadow-2xl">
             <img
               src={previewDataUrl}
               alt="ใบสอนแทนเต็มจอ"

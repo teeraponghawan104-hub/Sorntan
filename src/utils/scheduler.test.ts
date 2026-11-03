@@ -20,6 +20,12 @@ import {
   buildDocumentRows,
   buildCombinedDocumentRows,
   buildCombinedTeacherHeader,
+  formatCleanSubstituteName,
+  formatClassLevelLabel,
+  getSubjectNameFromCourse,
+  formatShortThaiDate,
+  formatThaiMonthYearHeader,
+  isSchoolAdministrator,
 } from "./scheduler";
 
 test("all 31 teachers (27 regular + 4 student teachers) from the 16-page PDF are loaded with 5x7 schedules", () => {
@@ -230,6 +236,74 @@ test("autoAssignCombinedSubstitutes and buildCombinedDocumentRows merge multiple
   );
   assert.equal(header.pdfGroup, "ภาษาไทย");
 });
+
+test("Image 1 10-column record form formatters produce exact Thai month/year, short date DD/MM/YY, room M.x/y, subject name, and clean substitute name", () => {
+  assert.equal(formatThaiMonthYearHeader("2026-05-18"), "ประจำเดือน พฤษภาคม พ.ศ. 2569");
+  assert.equal(formatThaiMonthYearHeader("2026-11-02"), "ประจำเดือน พฤศจิกายน พ.ศ. 2569");
+  assert.equal(formatShortThaiDate("2026-05-18"), "18/05/69");
+  assert.equal(formatShortThaiDate("2026-11-02"), "02/11/69");
+  assert.equal(formatClassLevelLabel("1/2"), "ม.1/2");
+  assert.equal(formatClassLevelLabel("4/1"), "ม.4/1");
+  assert.equal(formatClassLevelLabel("ม.2/1"), "ม.2/1");
+  assert.equal(getSubjectNameFromCourse("ท21101", "ภาษาไทย"), "ภาษาไทย");
+  assert.equal(getSubjectNameFromCourse("ค32102", "คณิตศาสตร์"), "คณิตศาสตร์");
+  assert.equal(formatCleanSubstituteName("ครูสุภาวรรณ ปวยทอง (นศ.ฝึกสอน)"), "นางสาวสุภาวรรณ ปวยทอง");
+  assert.equal(formatCleanSubstituteName("นายธีระเทพ มัครมย์ (นศ.ฝึกสอน)"), "นายธีระเทพ มัครมย์");
+});
+
+test("School administrators (100 ผอ., 101 รอง ผอ., 202 ผู้ช่วย ผอ., and บริหาร group) are strictly excluded from substitute assignment", () => {
+  const t100 = TEACHERS.find((t) => t.id === 100);
+  const t101 = TEACHERS.find((t) => t.id === 101);
+  const t202 = TEACHERS.find((t) => t.id === 202);
+  const t102 = TEACHERS.find((t) => t.id === 102);
+
+  assert.equal(isSchoolAdministrator(t100), true);
+  assert.equal(isSchoolAdministrator(t101), true);
+  assert.equal(isSchoolAdministrator(t202), true);
+  assert.equal(isSchoolAdministrator(t102), false);
+
+  // Across all 5 weekdays and all 7 periods, candidate lists must never include administrators
+  const testDates = [
+    "2026-11-02", // Monday
+    "2026-11-03", // Tuesday
+    "2026-11-04", // Wednesday
+    "2026-11-05", // Thursday
+    "2026-11-06", // Friday
+  ];
+
+  for (const date of testDates) {
+    for (let p = 0; p < 7; p++) {
+      const candidates = getCandidateTeachers(102, date, p);
+      const candIds = candidates.map((c) => c.id);
+      assert.equal(
+        candIds.includes(100),
+        false,
+        `100 (ผอ.) must not be a substitute candidate on ${date} period ${p}`
+      );
+      assert.equal(
+        candIds.includes(101),
+        false,
+        `101 (รอง ผอ.) must not be a substitute candidate on ${date} period ${p}`
+      );
+      assert.equal(
+        candIds.includes(202),
+        false,
+        `202 (ผู้ช่วย ผอ.) must not be a substitute candidate on ${date} period ${p}`
+      );
+    }
+  }
+
+  // Also verify autoAssignSubstitutes never assigns administrators
+  for (const date of testDates) {
+    const asg = autoAssignSubstitutes(102, date);
+    for (const val of Object.values(asg)) {
+      assert.notEqual(val, "t100");
+      assert.notEqual(val, "t101");
+      assert.notEqual(val, "t202");
+    }
+  }
+});
+
 
 
 
