@@ -37,7 +37,7 @@ export const Header: React.FC<HeaderProps> = ({
               src={LEFT_SCHOOL_LOGO_URL}
               alt="ตราโรงเรียนวรคุณอุปถัมภ์"
               referrerPolicy="no-referrer"
-              className="h-11 sm:h-14 w-auto object-contain shrink-0"
+              className="w-12 h-12 sm:w-14 sm:h-14 rounded-full bg-white p-1 border-2 border-[#f2c230] object-contain shrink-0 shadow-sm"
             />
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 flex-wrap">
