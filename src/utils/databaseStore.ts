@@ -24,10 +24,22 @@ const LOCAL_TEACHERS_KEY = "worakhun_teachers_db_v4";
 const LOCAL_RECORDS_KEY = "worakhun_sub_records_db_v2";
 const LOCAL_PLANNER_STATE_KEY = "worakhun_live_planner_v4";
 const LOCAL_SUBJECT_MAPPINGS_KEY = "worakhun_subject_mappings_v2";
+const LOCAL_ACADEMIC_SETTINGS_KEY = "worakhun_academic_settings_v1";
 
 export const SHARED_OWNER_ID = "worakhun_shared";
 export const LIVE_WORKSPACE_DOC_ID = "live_workspace";
 export const SUBJECT_MAPPINGS_DOC_ID = "custom";
+export const ACADEMIC_SETTINGS_DOC_ID = "academic_settings";
+
+export interface AcademicSettings {
+  academicYear: string; // เช่น "2569", "2570"
+  semester: string;     // เช่น "1", "2"
+}
+
+export const DEFAULT_ACADEMIC_SETTINGS: AcademicSettings = {
+  academicYear: "2569",
+  semester: "2",
+};
 
 export interface SavedSubstituteRecord {
   recordId: string;
@@ -627,3 +639,120 @@ export async function removeSubstituteRecordFromDatabase(
 
   return nextRecords;
 }
+
+/**
+ * ล้างประวัติใบสอนแทนทั้งหมด (สำหรับเริ่มต้นภาคเรียน / ปีการศึกษาใหม่)
+ */
+export async function clearAllSubstituteRecordsFromDatabase(
+  currentRecords: SavedSubstituteRecord[]
+): Promise<SavedSubstituteRecord[]> {
+  saveLocalSubstituteRecords([]);
+
+  const path = "substitute_records";
+  try {
+    const batch = writeBatch(db);
+    currentRecords.forEach((rec) => {
+      const cleanId = rec.recordId.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 128);
+      if (cleanId && cleanId !== LIVE_WORKSPACE_DOC_ID) {
+        batch.delete(doc(db, "substitute_records", cleanId));
+      }
+    });
+    await batch.commit();
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+  }
+
+  return [];
+}
+
+/**
+ * ตรวจสอบความถูกต้องของค่าตั้งต้นปีการศึกษาและภาคเรียน
+ */
+export function sanitizeAcademicSettings(
+  raw?: Partial<AcademicSettings> | null
+): AcademicSettings {
+  const rawYear = String(raw?.academicYear || "").trim();
+  const parsedYear = parseInt(rawYear, 10);
+  const cleanYear =
+    Number.isFinite(parsedYear) && parsedYear >= 2500 && parsedYear <= 2699
+      ? String(parsedYear)
+      : DEFAULT_ACADEMIC_SETTINGS.academicYear;
+
+  const rawSemester = String(raw?.semester || "").trim();
+  const cleanSemester =
+    rawSemester === "1" || rawSemester === "2" || rawSemester === "ฤดูร้อน"
+      ? rawSemester
+      : DEFAULT_ACADEMIC_SETTINGS.semester;
+
+  return {
+    academicYear: cleanYear,
+    semester: cleanSemester,
+  };
+}
+
+export function loadLocalAcademicSettings(): AcademicSettings {
+  try {
+    if (typeof localStorage === "undefined") {
+      return { ...DEFAULT_ACADEMIC_SETTINGS };
+    }
+    const raw = localStorage.getItem(LOCAL_ACADEMIC_SETTINGS_KEY);
+    if (!raw) {
+      return { ...DEFAULT_ACADEMIC_SETTINGS };
+    }
+    const parsed = JSON.parse(raw) as Partial<AcademicSettings>;
+    return sanitizeAcademicSettings(parsed);
+  } catch {
+    return { ...DEFAULT_ACADEMIC_SETTINGS };
+  }
+}
+
+export function saveLocalAcademicSettings(
+  settings: Partial<AcademicSettings>
+): AcademicSettings {
+  const clean = sanitizeAcademicSettings(settings);
+  try {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(LOCAL_ACADEMIC_SETTINGS_KEY, JSON.stringify(clean));
+    }
+  } catch {
+    // Ignore storage quota errors
+  }
+  return clean;
+}
+
+/**
+ * บันทึกปีการศึกษาและภาคเรียนลง Cloud Firestore เพื่อให้ทุกเครื่องเห็นตรงกันแบบเรียลไทม์
+ */
+export async function saveAcademicSettingsToCloud(
+  settings: Partial<AcademicSettings>
+): Promise<AcademicSettings> {
+  const clean = saveLocalAcademicSettings(settings);
+  const path = `subject_mappings/${ACADEMIC_SETTINGS_DOC_ID}`;
+  const docRef = doc(db, "subject_mappings", ACADEMIC_SETTINGS_DOC_ID);
+  const mappingsJson = JSON.stringify(clean).slice(0, 5000);
+
+  await enqueueCloudWrite(async () => {
+    try {
+      const existingSnap = await getDoc(docRef);
+      if (existingSnap.exists()) {
+        await updateDoc(docRef, {
+          mappingsJson,
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        await setDoc(docRef, {
+          recordId: ACADEMIC_SETTINGS_DOC_ID,
+          mappingsJson,
+          ownerId: SHARED_OWNER_ID,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, path);
+    }
+  });
+
+  return clean;
+}
+

@@ -7,9 +7,11 @@ import {
   TeacherRecord,
 } from "../data/teachers";
 import { parseScheduleCell } from "../utils/scheduler";
+import { AcademicSettings, DEFAULT_ACADEMIC_SETTINGS } from "../utils/databaseStore";
 
 interface MasterTimetableViewProps {
   teachers: TeacherRecord[];
+  academicSettings?: AcademicSettings;
   initialFocusTeacherId?: number | null;
   onSelectTeacherForSubstitute: (teacherId: number) => void;
   onOpenAddTeacher: () => void;
@@ -18,6 +20,7 @@ interface MasterTimetableViewProps {
 
 export const MasterTimetableView: React.FC<MasterTimetableViewProps> = ({
   teachers,
+  academicSettings = DEFAULT_ACADEMIC_SETTINGS,
   initialFocusTeacherId,
   onSelectTeacherForSubstitute,
   onOpenAddTeacher,
@@ -30,6 +33,10 @@ export const MasterTimetableView: React.FC<MasterTimetableViewProps> = ({
 
   const regularCount = teachers.filter((t) => !t.isStudentTeacher).length;
   const studentCount = teachers.filter((t) => Boolean(t.isStudentTeacher)).length;
+  const semesterLabel =
+    academicSettings.semester === "ฤดูร้อน"
+      ? "ภาคฤดูร้อน"
+      : `ภาคเรียนที่ ${academicSettings.semester}`;
 
   const filteredTeachers = teachers.filter((t) => {
     const matchGroup =
@@ -143,7 +150,7 @@ export const MasterTimetableView: React.FC<MasterTimetableViewProps> = ({
               ตารางสอนครูและบุคลากรทั้งหมด ({teachers.length} ท่าน)
             </h2>
             <p className="text-sm text-[#51608a] dark:text-[#9fb0dc]">
-              ครูประจำการ {regularCount} ท่าน · นักศึกษาฝึกสอน {studentCount} ท่าน พร้อมปุ่มแก้ไขตารางสอนรายบุคคล
+              {semesterLabel} ปีการศึกษา {academicSettings.academicYear} · ครูประจำการ {regularCount} ท่าน · นักศึกษาฝึกสอน {studentCount} ท่าน
             </p>
           </div>
 
@@ -253,7 +260,7 @@ export const MasterTimetableView: React.FC<MasterTimetableViewProps> = ({
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 mb-4 border-b border-[#c9d4ec] dark:border-[#2a3a6e]">
                 <div className="text-center md:text-left flex-1">
                   <div className="text-base font-bold text-[#0f2150] dark:text-[#e9eefc]">
-                    โรงเรียนวรคุณอุปถัมภ์ · ตารางสอนภาคเรียนที่ 2 ปีการศึกษา 2569 กลุ่ม/ฝ่าย/งาน{" "}
+                    โรงเรียนวรคุณอุปถัมภ์ · ตารางสอน{semesterLabel} ปีการศึกษา {academicSettings.academicYear} กลุ่ม/ฝ่าย/งาน{" "}
                     {teacher.pdfGroup}
                   </div>
                   <div className="text-lg font-bold text-[#1b4fb8] dark:text-[#6c97ff] mt-0.5">
@@ -261,12 +268,12 @@ export const MasterTimetableView: React.FC<MasterTimetableViewProps> = ({
                     {teacher.isStudentTeacher ? " (นักศึกษาฝึกสอน)" : ""} &nbsp;·&nbsp; จำนวนชั่วโมง{" "}
                     {teacher.totalHours}
                     {teacher.id === 302 && (
-                      <span className="ml-2 inline-block px-2.5 py-0.5 text-xs font-bold rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200">
+                      <span className="ml-2 inline-block px-2.5 py-0.5 text-xs font-bold rounded-md bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200">
                         ย้ายไป รร.อื่น · โอนคาบสอนให้ 305 ครูศักดิ์ชัย แสงมาศ ทั้งหมด
                       </span>
                     )}
                     {teacher.id === 305 && (
-                      <span className="ml-2 inline-block px-2.5 py-0.5 text-xs font-bold rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-200">
+                      <span className="ml-2 inline-block px-2.5 py-0.5 text-xs font-bold rounded-md bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-200">
                         รวมคาบสอนจาก 302 ครูรณสิทธิ์ ประดับศรี ทั้งหมดแล้ว
                       </span>
                     )}

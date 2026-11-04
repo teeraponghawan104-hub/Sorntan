@@ -698,3 +698,24 @@ test("Word (.docx) export generates quickly, produces a compact file (< 200 KB),
   assert.ok(Number(bioCellMatch[1]) < 32, `Long subject font size must auto-fit (< 32), got ${bioCellMatch[1]}`);
 });
 
+test("adjustDateToAcademicYear shifts date to target Buddhist Era year and ensures a valid Mon-Fri weekday", async () => {
+  const { adjustDateToAcademicYear, formatThaiMonthYearHeader, formatShortThaiDate } = await import(
+    "./scheduler"
+  );
+
+  // 2026-11-04 (Wed, B.E. 2569) -> B.E. 2570 (2027-11-04 is Thu)
+  const date2570 = adjustDateToAcademicYear("2026-11-04", "2570");
+  assert.equal(date2570, "2027-11-04");
+  assert.ok(getDayIndex(date2570) >= 0 && getDayIndex(date2570) <= 4);
+  assert.equal(formatThaiMonthYearHeader(date2570), "ประจำเดือน พฤศจิกายน พ.ศ. 2570");
+  assert.equal(formatShortThaiDate(date2570), "04/11/70");
+
+  // 2026-11-04 -> B.E. 2571 (2028-11-04 is Saturday -> shifts to Monday 2028-11-06)
+  const date2571 = adjustDateToAcademicYear("2026-11-04", "2571");
+  assert.equal(date2571, "2028-11-06");
+  assert.equal(getDayIndex(date2571), 0); // Monday
+  assert.equal(formatThaiMonthYearHeader(date2571), "ประจำเดือน พฤศจิกายน พ.ศ. 2571");
+  assert.equal(formatShortThaiDate(date2571), "06/11/71");
+});
+
+

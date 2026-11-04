@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Cloud,
   Database,
@@ -14,6 +14,8 @@ import {
   BookOpen,
   X,
   Check,
+  Calendar,
+  Save,
 } from "lucide-react";
 import { DEPARTMENT_GROUPS, TeacherRecord } from "../data/teachers";
 import {
@@ -23,38 +25,64 @@ import {
   resolveSubstitute,
   SubjectCodeInfo,
 } from "../utils/scheduler";
-import { SavedSubstituteRecord } from "../utils/databaseStore";
+import {
+  AcademicSettings,
+  DEFAULT_ACADEMIC_SETTINGS,
+  SavedSubstituteRecord,
+} from "../utils/databaseStore";
 
 interface DatabaseManagerViewProps {
   teachers: TeacherRecord[];
   savedRecords: SavedSubstituteRecord[];
   subjectMappings: Record<string, string>;
+  academicSettings: AcademicSettings;
+  onSaveAcademicSettings: (settings: AcademicSettings) => Promise<void>;
   onOpenAddTeacher: () => void;
   onOpenEditTeacher: (teacher: TeacherRecord) => void;
   onDeleteTeacher: (teacherId: number) => Promise<void>;
   onResetDefaultTeachers: () => Promise<void>;
   onLoadSubstituteRecord: (record: SavedSubstituteRecord) => void;
   onDeleteSubstituteRecord: (recordId: string) => Promise<void>;
+  onClearAllSubstituteRecords: () => Promise<void>;
   onViewTeacherTimetable: (teacherId: number) => void;
   onSaveSubjectMappings: (newMappings: Record<string, string>) => Promise<void>;
   onResetSubjectMappings: () => Promise<void>;
 }
 
+const QUICK_ACADEMIC_YEARS = ["2568", "2569", "2570", "2571", "2572", "2573"];
+const QUICK_SEMESTERS = [
+  { value: "1", label: "ภาคเรียนที่ 1" },
+  { value: "2", label: "ภาคเรียนที่ 2" },
+  { value: "ฤดูร้อน", label: "ภาคฤดูร้อน" },
+];
+
 export const DatabaseManagerView: React.FC<DatabaseManagerViewProps> = ({
   teachers,
   savedRecords,
   subjectMappings,
+  academicSettings = DEFAULT_ACADEMIC_SETTINGS,
+  onSaveAcademicSettings,
   onOpenAddTeacher,
   onOpenEditTeacher,
   onDeleteTeacher,
   onResetDefaultTeachers,
   onLoadSubstituteRecord,
   onDeleteSubstituteRecord,
+  onClearAllSubstituteRecords,
   onViewTeacherTimetable,
   onSaveSubjectMappings,
   onResetSubjectMappings,
 }) => {
   const [subTab, setSubTab] = useState<"teachers" | "subjects" | "records">("teachers");
+
+  // State สำหรับตั้งค่าปีการศึกษาและภาคเรียน
+  const [yearInput, setYearInput] = useState<string>(academicSettings.academicYear);
+  const [semesterInput, setSemesterInput] = useState<string>(academicSettings.semester);
+
+  useEffect(() => {
+    setYearInput(academicSettings.academicYear);
+    setSemesterInput(academicSettings.semester);
+  }, [academicSettings.academicYear, academicSettings.semester]);
 
   // State สำหรับครู
   const [searchQuery, setSearchQuery] = useState<string>("");
@@ -64,6 +92,7 @@ export const DatabaseManagerView: React.FC<DatabaseManagerViewProps> = ({
 
   // State สำหรับประวัติใบสอนแทน
   const [confirmDeleteRecordId, setConfirmDeleteRecordId] = useState<string | null>(null);
+  const [confirmClearAllRecords, setConfirmClearAllRecords] = useState<boolean>(false);
 
   // State สำหรับรหัสวิชา & ชื่อวิชา
   const [subjectSearch, setSubjectSearch] = useState<string>("");
@@ -104,7 +133,6 @@ export const DatabaseManagerView: React.FC<DatabaseManagerViewProps> = ({
   });
 
   const filteredDiscoveredSubjects = discoveredSubjects.filter((item) => {
-    // กรองหมวดหมู่รหัสวิชา
     if (subjectCategoryFilter === "แก้ไขแล้ว" && !item.isCustom) return false;
     if (subjectCategoryFilter === "วิทยาศาสตร์ (ว)" && !item.code.startsWith("ว")) return false;
     if (subjectCategoryFilter === "คณิตศาสตร์ (ค)" && !item.code.startsWith("ค")) return false;
@@ -126,7 +154,6 @@ export const DatabaseManagerView: React.FC<DatabaseManagerViewProps> = ({
     )
       return false;
 
-    // กรองคำค้นหา
     const q = subjectSearch.trim().toLowerCase();
     if (!q) return true;
     return (
@@ -136,6 +163,43 @@ export const DatabaseManagerView: React.FC<DatabaseManagerViewProps> = ({
       item.teacherNames.some((tn) => tn.toLowerCase().includes(q))
     );
   });
+
+  // บันทึกปีการศึกษาและภาคเรียน
+  const handleSaveAcademicYearAndSemester = async (
+    overrideYear?: string,
+    overrideSemester?: string
+  ) => {
+    const cleanYear = String(overrideYear ?? yearInput).trim();
+    const parsedYear = parseInt(cleanYear, 10);
+    if (!Number.isFinite(parsedYear) || parsedYear < 2500 || parsedYear > 2699) {
+      setStatusBanner({
+        text: "กรุณาระบุปีการศึกษา (พ.ศ.) เป็นตัวเลข 4 หลัก เช่น 2569, 2570",
+        type: "err",
+      });
+      return;
+    }
+    const cleanSemester = String(overrideSemester ?? semesterInput).trim() || "2";
+    try {
+      setBusy(true);
+      await onSaveAcademicSettings({
+        academicYear: String(parsedYear),
+        semester: cleanSemester,
+      });
+      const semText =
+        cleanSemester === "ฤดูร้อน" ? "ภาคฤดูร้อน" : `ภาคเรียนที่ ${cleanSemester}`;
+      setStatusBanner({
+        text: `อัปเดตเป็น "${semText} ปีการศึกษา ${parsedYear}" เรียบร้อยแล้ว (เปลี่ยนพร้อมกันทุกหน้าในระบบ)`,
+        type: "ok",
+      });
+    } catch (err: unknown) {
+      setStatusBanner({
+        text: err instanceof Error ? err.message : "บันทึกปีการศึกษาไม่สำเร็จ",
+        type: "err",
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
 
   // ลบครู
   const handleConfirmDeleteTeacher = async () => {
@@ -186,6 +250,26 @@ export const DatabaseManagerView: React.FC<DatabaseManagerViewProps> = ({
     } catch (err: unknown) {
       setStatusBanner({
         text: err instanceof Error ? err.message : "ลบใบสอนแทนไม่สำเร็จ",
+        type: "err",
+      });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // ล้างประวัติใบสอนแทนทั้งหมด
+  const handleConfirmClearAllRecords = async () => {
+    try {
+      setBusy(true);
+      await onClearAllSubstituteRecords();
+      setConfirmClearAllRecords(false);
+      setStatusBanner({
+        text: "ล้างประวัติใบสอนแทนทั้งหมดเรียบร้อยแล้ว พร้อมสำหรับเริ่มปีการศึกษา/ภาคเรียนใหม่",
+        type: "ok",
+      });
+    } catch (err: unknown) {
+      setStatusBanner({
+        text: err instanceof Error ? err.message : "ล้างประวัติไม่สำเร็จ",
         type: "err",
       });
     } finally {
@@ -300,6 +384,109 @@ export const DatabaseManagerView: React.FC<DatabaseManagerViewProps> = ({
 
   return (
     <div className="space-y-4 sm:space-y-5 w-full">
+      {/* แผงตั้งค่าปีการศึกษาและภาคเรียน (สำหรับใช้งานในปีต่อๆ ไป) */}
+      <section className="bg-white dark:bg-[#14204a] border border-[#c9d4ec] dark:border-[#2a3a6e] rounded-xl p-4 sm:p-5 shadow-xs">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2 flex-wrap">
+              <Calendar className="w-5 h-5 text-[#1b4fb8] dark:text-[#6c97ff]" />
+              <h2 className="text-base sm:text-lg font-bold text-[#0f2150] dark:text-[#e9eefc]">
+                ตั้งค่าภาคเรียนและปีการศึกษา (สำหรับใช้งานในปีต่อๆ ไป)
+              </h2>
+              <span className="px-2 py-0.5 rounded-md bg-[#eaf0fa] dark:bg-[#0b1330] text-[#1b4fb8] dark:text-[#6c97ff] text-xs font-bold border border-[#c9d4ec] dark:border-[#2a3a6e]">
+                กำลังใช้งาน:{" "}
+                {academicSettings.semester === "ฤดูร้อน"
+                  ? "ภาคฤดูร้อน"
+                  : `ภาคเรียนที่ ${academicSettings.semester}`}{" "}
+                ปีการศึกษา {academicSettings.academicYear}
+              </span>
+            </div>
+            <p className="text-xs sm:text-sm text-[#51608a] dark:text-[#9fb0dc]">
+              เมื่อเปลี่ยนปีการศึกษาหรือภาคเรียน ระบบจะอัปเดตหัวตารางสอนและปี พ.ศ. ในหน้าจัดสอนแทนให้ตรงกันทุกเครื่องโดยอัตโนมัติ
+            </p>
+          </div>
+
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+            {/* เลือกภาคเรียน */}
+            <div className="flex items-center gap-1.5 bg-[#eaf0fa] dark:bg-[#0b1330] p-1 rounded-lg border border-[#c9d4ec] dark:border-[#2a3a6e]">
+              {QUICK_SEMESTERS.map((sem) => (
+                <button
+                  key={sem.value}
+                  type="button"
+                  disabled={busy}
+                  onClick={() => {
+                    setSemesterInput(sem.value);
+                    handleSaveAcademicYearAndSemester(yearInput, sem.value);
+                  }}
+                  className={`px-3 py-1.5 rounded-md text-xs sm:text-sm font-bold transition-colors cursor-pointer whitespace-nowrap ${
+                    semesterInput === sem.value
+                      ? "bg-[#1b4fb8] text-white shadow-2xs"
+                      : "text-[#0f2150] dark:text-[#9fb0dc] hover:bg-white/60 dark:hover:bg-[#14204a]"
+                  }`}
+                >
+                  {sem.label}
+                </button>
+              ))}
+            </div>
+
+            {/* ระบุปีการศึกษา พ.ศ. */}
+            <div className="flex items-center gap-2">
+              <label
+                htmlFor="academic-year-input"
+                className="text-xs sm:text-sm font-bold text-[#0f2150] dark:text-[#e9eefc] whitespace-nowrap"
+              >
+                ปีการศึกษา (พ.ศ.):
+              </label>
+              <input
+                id="academic-year-input"
+                type="number"
+                min={2500}
+                max={2699}
+                value={yearInput}
+                onChange={(e) => setYearInput(e.target.value)}
+                aria-label="ปีการศึกษา พ.ศ."
+                className="w-24 px-3 py-1.5 rounded-lg border border-[#c9d4ec] dark:border-[#2a3a6e] bg-white dark:bg-[#0b1330] text-sm font-bold text-center text-[#0f2150] dark:text-[#e9eefc] focus:outline-2 focus:outline-[#f2c230]"
+              />
+              <button
+                type="button"
+                id="save-academic-year-btn"
+                disabled={busy}
+                onClick={() => handleSaveAcademicYearAndSemester()}
+                className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[#0b7a4b] hover:bg-[#085c38] disabled:opacity-50 text-white text-xs sm:text-sm font-bold shadow-xs transition-colors cursor-pointer whitespace-nowrap"
+              >
+                <Save className="w-4 h-4 shrink-0" />
+                <span>บันทึกปีการศึกษา</span>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* ปุ่มลัดเลือกปีการศึกษา */}
+        <div className="flex flex-wrap items-center gap-1.5 mt-3 pt-3 border-t border-dashed border-[#c9d4ec] dark:border-[#2a3a6e]">
+          <span className="text-xs font-semibold text-[#51608a] dark:text-[#9fb0dc] mr-1">
+            เลือกปีการศึกษาด่วน:
+          </span>
+          {QUICK_ACADEMIC_YEARS.map((yr) => (
+            <button
+              key={yr}
+              type="button"
+              disabled={busy}
+              onClick={() => {
+                setYearInput(yr);
+                handleSaveAcademicYearAndSemester(yr, semesterInput);
+              }}
+              className={`px-2.5 py-1 rounded-md text-xs font-bold transition-colors cursor-pointer ${
+                academicSettings.academicYear === yr
+                  ? "bg-[#1b4fb8] text-white"
+                  : "bg-[#eaf0fa] dark:bg-[#0b1330] text-[#0f2150] dark:text-[#9fb0dc] hover:bg-blue-200 dark:hover:bg-blue-900"
+              }`}
+            >
+              พ.ศ. {yr}
+            </button>
+          ))}
+        </div>
+      </section>
+
       {/* แผงควบคุมฐานข้อมูลและสถานะ Cloud Firestore */}
       <section className="bg-white dark:bg-[#14204a] border border-[#c9d4ec] dark:border-[#2a3a6e] rounded-xl p-4 sm:p-5 shadow-xs">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
@@ -321,7 +508,7 @@ export const DatabaseManagerView: React.FC<DatabaseManagerViewProps> = ({
             <div className="flex items-center gap-1.5 bg-emerald-50 dark:bg-emerald-950/50 px-3 py-2 rounded-lg border border-emerald-200 dark:border-emerald-800">
               <Cloud className="w-4 h-4 text-[#0b7a4b] dark:text-[#4fd39a] shrink-0" />
               <span className="text-xs font-bold text-[#0b7a4b] dark:text-[#4fd39a]">
-                ซิงก์ฐานข้อมูลกลางอัตโนมัติ (ไม่ต้องล็อกอิน)
+                ซิงก์ฐานข้อมูลกลางอัตโนมัติ
               </span>
             </div>
 
@@ -369,6 +556,17 @@ export const DatabaseManagerView: React.FC<DatabaseManagerViewProps> = ({
                   </button>
                 )}
               </>
+            )}
+
+            {subTab === "records" && savedRecords.length > 0 && (
+              <button
+                type="button"
+                onClick={() => setConfirmClearAllRecords(true)}
+                className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-red-300 dark:border-red-800 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/50 text-xs sm:text-sm font-semibold transition-colors cursor-pointer"
+              >
+                <Trash2 className="w-4 h-4 shrink-0" />
+                <span>ล้างประวัติทั้งหมด (เริ่มปีใหม่)</span>
+              </button>
             )}
           </div>
         </div>
@@ -544,6 +742,40 @@ export const DatabaseManagerView: React.FC<DatabaseManagerViewProps> = ({
         </div>
       )}
 
+      {/* ยืนยันการล้างประวัติใบสอนแทนทั้งหมด */}
+      {confirmClearAllRecords && (
+        <div className="bg-red-50 dark:bg-red-950/60 border border-red-300 dark:border-red-700 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div className="flex items-start gap-2.5">
+            <AlertTriangle className="w-5 h-5 text-red-700 dark:text-red-400 shrink-0 mt-0.5" />
+            <div>
+              <h3 className="text-sm font-bold text-red-900 dark:text-red-200">
+                ยืนยันการล้างประวัติใบสอนแทนทั้งหมด ({savedRecords.length} รายการ)?
+              </h3>
+              <p className="text-xs text-red-800 dark:text-red-300 mt-0.5">
+                เหมาะสำหรับการเริ่มต้นภาคเรียนหรือปีการศึกษาใหม่ ข้อมูลรายชื่อครูและตารางสอนจะไม่ถูกลบ
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => setConfirmClearAllRecords(false)}
+              className="px-3 py-1.5 rounded-lg border border-red-300 text-xs font-semibold text-red-900 dark:text-red-200 cursor-pointer"
+            >
+              ยกเลิก
+            </button>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={handleConfirmClearAllRecords}
+              className="px-3.5 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white text-xs font-bold cursor-pointer"
+            >
+              {busy ? "กำลังล้างประวัติ..." : "ยืนยันล้างประวัติทั้งหมด"}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* หมวดที่ 1: จัดการรายชื่อครูและตารางสอน */}
       {subTab === "teachers" && (
         <section className="bg-white dark:bg-[#14204a] border border-[#c9d4ec] dark:border-[#2a3a6e] rounded-xl p-4 sm:p-5 shadow-xs space-y-4">
@@ -611,21 +843,21 @@ export const DatabaseManagerView: React.FC<DatabaseManagerViewProps> = ({
                       {t.id} {t.n}
                     </span>
                     {t.isStudentTeacher ? (
-                      <span className="px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-950 text-amber-900 dark:text-amber-300 text-xs font-bold">
+                      <span className="px-2 py-0.5 rounded-md bg-amber-100 dark:bg-amber-950 text-amber-900 dark:text-amber-300 text-xs font-bold">
                         นักศึกษาฝึกสอน
                       </span>
                     ) : (
-                      <span className="px-2 py-0.5 rounded bg-[#eaf0fa] dark:bg-[#0b1330] text-[#1b4fb8] dark:text-[#6c97ff] text-xs font-semibold">
+                      <span className="px-2 py-0.5 rounded-md bg-[#eaf0fa] dark:bg-[#0b1330] text-[#1b4fb8] dark:text-[#6c97ff] text-xs font-semibold">
                         {t.pdfGroup}
                       </span>
                     )}
                     {t.id === 302 && (
-                      <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200 text-xs font-bold">
+                      <span className="px-2 py-0.5 rounded-md bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200 text-xs font-bold">
                         ย้ายไป รร.อื่น · โอนคาบให้ 305 ครูศักดิ์ชัย ทั้งหมด
                       </span>
                     )}
                     {t.id === 305 && (
-                      <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-200 text-xs font-bold">
+                      <span className="px-2 py-0.5 rounded-md bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-200 text-xs font-bold">
                         รับโอนคาบชีววิทยาจาก 302 ครูรณสิทธิ์ ทั้งหมด
                       </span>
                     )}
@@ -749,11 +981,11 @@ export const DatabaseManagerView: React.FC<DatabaseManagerViewProps> = ({
                       </td>
                       <td className="p-3 text-center">
                         {item.isCustom ? (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 dark:bg-emerald-950 text-[#0b7a4b] dark:text-[#4fd39a] text-xs font-bold">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-100 dark:bg-emerald-950 text-[#0b7a4b] dark:text-[#4fd39a] text-xs font-bold">
                             <Check className="w-3 h-3" /> แก้ไขแล้ว
                           </span>
                         ) : (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-slate-100 dark:bg-slate-800 text-[#51608a] dark:text-[#9fb0dc] text-xs font-medium">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-[#51608a] dark:text-[#9fb0dc] text-xs font-medium">
                             ค่าเริ่มต้น
                           </span>
                         )}
@@ -803,7 +1035,7 @@ export const DatabaseManagerView: React.FC<DatabaseManagerViewProps> = ({
                 ยังไม่มีประวัติใบสอนแทนที่บันทึกไว้ในฐานข้อมูล
               </p>
               <p className="text-xs mt-1">
-                สามารถกดปุ่ม &ldquo;บันทึกใบสอนแทนลงฐานข้อมูล&rdquo; ได้ที่หน้าจัดครูสอนแทน
+                สามารถกดปุ่ม &ldquo;บันทึกประวัติ&rdquo; ได้ที่หน้าจัดสอนแทน
               </p>
             </div>
           ) : (
@@ -831,7 +1063,7 @@ export const DatabaseManagerView: React.FC<DatabaseManagerViewProps> = ({
                             ? rec.absentTeacherName
                             : `${rec.absentTeacherId} ${rec.absentTeacherName}`}
                         </span>
-                        <span className="px-2 py-0.5 rounded bg-[#eaf0fa] dark:bg-[#0b1330] text-[#1b4fb8] dark:text-[#6c97ff] text-xs font-semibold">
+                        <span className="px-2 py-0.5 rounded-md bg-[#eaf0fa] dark:bg-[#0b1330] text-[#1b4fb8] dark:text-[#6c97ff] text-xs font-semibold">
                           วันที่ {formatThaiDate(rec.selectedDate)}
                         </span>
                         <span className="text-xs text-[#51608a] dark:text-[#9fb0dc]">

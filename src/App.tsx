@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { collection, onSnapshot, query, where } from "firebase/firestore";
 import { ActiveTab, Header } from "./components/Header";
 import { SubstitutePlanner } from "./components/SubstitutePlanner";
@@ -8,26 +8,32 @@ import { DatabaseManagerView } from "./components/DatabaseManagerView";
 import { TeacherEditorModal } from "./components/TeacherEditorModal";
 import { INITIAL_TEACHERS, TeacherRecord } from "./data/teachers";
 import {
+  adjustDateToAcademicYear,
   autoAssignCombinedSubstitutes,
   buildCombinedTeacherHeader,
-  getCombinedTeacherClasses,
   getInitialWeekdayDate,
   isTeacherExemptFromNeedingSubstitute,
 } from "./utils/scheduler";
 import { OperationType, db, handleFirestoreError } from "./firebase";
 import {
+  ACADEMIC_SETTINGS_DOC_ID,
+  AcademicSettings,
   LIVE_WORKSPACE_DOC_ID,
   LivePlannerWorkspaceState,
   SHARED_OWNER_ID,
   SUBJECT_MAPPINGS_DOC_ID,
   SavedSubstituteRecord,
+  clearAllSubstituteRecordsFromDatabase,
   decodeAssignments,
+  loadLocalAcademicSettings,
   loadLocalPlannerState,
   loadLocalSubjectMappings,
   loadLocalSubstituteRecords,
   loadLocalTeachers,
   removeSubstituteRecordFromDatabase,
   removeTeacherFromDatabase,
+  saveAcademicSettingsToCloud,
+  saveLocalAcademicSettings,
   saveLocalPlannerState,
   saveLocalSubjectMappings,
   saveLocalSubstituteRecords,
@@ -42,13 +48,16 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>("planner");
   const [darkMode, setDarkMode] = useState<boolean>(false);
 
-  // รายชื่อครูทั้งหมด, ประวัติใบสอนแทน และรหัสวิชาจากฐานข้อมูลกลาง
+  // รายชื่อครูทั้งหมด, ประวัติใบสอนแทน, รหัสวิชา และปีการศึกษาจากฐานข้อมูลกลาง
   const [teachers, setTeachers] = useState<TeacherRecord[]>(() => loadLocalTeachers());
   const [savedRecords, setSavedRecords] = useState<SavedSubstituteRecord[]>(() =>
     loadLocalSubstituteRecords()
   );
   const [subjectMappings, setSubjectMappings] = useState<Record<string, string>>(() =>
     loadLocalSubjectMappings()
+  );
+  const [academicSettings, setAcademicSettings] = useState<AcademicSettings>(() =>
+    loadLocalAcademicSettings()
   );
 
   // สถานะ Modal แก้ไข/เพิ่มครู
@@ -235,6 +244,17 @@ export default function App() {
                 if (parsed && typeof parsed === "object") {
                   saveLocalSubjectMappings(parsed);
                   setSubjectMappings(parsed);
+                }
+              } catch {
+                // Ignore parse errors
+              }
+            } else if (docSnap.id === ACADEMIC_SETTINGS_DOC_ID) {
+              const d = docSnap.data();
+              try {
+                const parsed = JSON.parse(String(d.mappingsJson || "{}"));
+                if (parsed && typeof parsed === "object") {
+                  const cleanSettings = saveLocalAcademicSettings(parsed);
+                  setAcademicSettings(cleanSettings);
                 }
               } catch {
                 // Ignore parse errors
@@ -570,6 +590,12 @@ export default function App() {
     setSavedRecords(updated);
   };
 
+  // CRUD: ล้างประวัติใบสอนแทนทั้งหมด (สำหรับเริ่มต้นภาคเรียน / ปีการศึกษาใหม่)
+  const handleClearAllSubstituteRecords = async () => {
+    const updated = await clearAllSubstituteRecordsFromDatabase(savedRecords);
+    setSavedRecords(updated);
+  };
+
   // CRUD: บันทึกผูกชื่อวิชาตามรหัสวิชา
   const handleSaveSubjectMappings = async (newMappings: Record<string, string>) => {
     const updated = await saveSubjectMappingsToCloud(newMappings);
@@ -580,6 +606,32 @@ export default function App() {
   const handleResetSubjectMappings = async () => {
     const updated = await saveSubjectMappingsToCloud({});
     setSubjectMappings({ ...updated });
+  };
+
+  // CRUD: บันทึกปีการศึกษาและภาคเรียนลงฐานข้อมูลกลาง และปรับปีของวันที่จัดสอนแทนให้ตรงกับปีการศึกษาใหม่ทันที
+  const handleSaveAcademicSettings = async (newSettings: AcademicSettings) => {
+    const updated = await saveAcademicSettingsToCloud(newSettings);
+    setAcademicSettings({ ...updated });
+
+    // ปรับปีของวันที่ในหน้าจัดสอนแทนให้ตรงกับปีการศึกษาที่เลือก เพื่อให้ใบสอนแทนแสดง พ.ศ. ตรงกันทันที
+    const nextDate = adjustDateToAcademicYear(selectedDate, updated.academicYear);
+    if (nextDate !== selectedDate) {
+      const nextAssignments = autoAssignCombinedSubstitutes(
+        absentTeacherIds,
+        nextDate,
+        includeSupervision
+      );
+      setSelectedDate(nextDate);
+      setAssignments(nextAssignments);
+      saveLocalDraft({
+        absentTeacherIds,
+        selectedDate: nextDate,
+        reason,
+        studentTeacherName,
+        includeSupervision,
+        assignments: nextAssignments,
+      });
+    }
   };
 
   return (
@@ -593,12 +645,14 @@ export default function App() {
         darkMode={darkMode}
         onToggleDarkMode={() => setDarkMode((d) => !d)}
         teacherCount={teachers.length}
+        academicSettings={academicSettings}
       />
 
       <main className="max-w-[1360px] mx-auto p-3 sm:p-4 md:p-5">
         {activeTab === "planner" && (
           <SubstitutePlanner
             teachers={teachers}
+            academicSettings={academicSettings}
             absentTeacherIds={absentTeacherIds}
             onChangePrimaryTeacherId={handlePrimaryTeacherChange}
             onAddAbsentTeacher={handleAddAbsentTeacher}
@@ -626,6 +680,7 @@ export default function App() {
         {activeTab === "timetables" && (
           <MasterTimetableView
             teachers={teachers}
+            academicSettings={academicSettings}
             initialFocusTeacherId={focusTimetableTeacherId}
             onSelectTeacherForSubstitute={handleSelectTeacherFromDirectory}
             onOpenAddTeacher={() => {
@@ -642,6 +697,7 @@ export default function App() {
         {activeTab === "free-finder" && (
           <FreeTeacherFinder
             teachers={teachers}
+            academicSettings={academicSettings}
             onSelectTeacherForSubstitute={handleSelectTeacherFromDirectory}
           />
         )}
@@ -651,6 +707,8 @@ export default function App() {
             teachers={teachers}
             savedRecords={savedRecords}
             subjectMappings={subjectMappings}
+            academicSettings={academicSettings}
+            onSaveAcademicSettings={handleSaveAcademicSettings}
             onOpenAddTeacher={() => {
               setEditingTeacher(null);
               setEditorModalOpen(true);
@@ -663,6 +721,7 @@ export default function App() {
             onResetDefaultTeachers={handleResetDefaultTeachers}
             onLoadSubstituteRecord={handleLoadSubstituteRecord}
             onDeleteSubstituteRecord={handleDeleteSubstituteRecord}
+            onClearAllSubstituteRecords={handleClearAllSubstituteRecords}
             onViewTeacherTimetable={handleViewTeacherTimetable}
             onSaveSubjectMappings={handleSaveSubjectMappings}
             onResetSubjectMappings={handleResetSubjectMappings}
@@ -671,7 +730,13 @@ export default function App() {
       </main>
 
       <footer className="mt-8 py-4 border-t border-[#c9d4ec] dark:border-[#2a3a6e] text-center text-xs text-[#51608a] dark:text-[#9fb0dc] print:hidden">
-        <p>ระบบจัดสอนแทน โรงเรียนวรคุณอุปถัมภ์</p>
+        <p>
+          ระบบจัดสอนแทน โรงเรียนวรคุณอุปถัมภ์ ·{" "}
+          {academicSettings.semester === "ฤดูร้อน"
+            ? "ภาคฤดูร้อน"
+            : `ภาคเรียนที่ ${academicSettings.semester}`}{" "}
+          ปีการศึกษา {academicSettings.academicYear}
+        </p>
         <p className="mt-0.5 font-medium text-[#1b4fb8] dark:text-[#6c97ff]">
           พัฒนาโดย นักศึกษาฝึกวิชาชีพครู นายธีระพงษ์ หาวัน
         </p>

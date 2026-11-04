@@ -1438,6 +1438,48 @@ export function getInitialWeekdayDate(baseDate = new Date()): string {
   return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
 }
 
+/**
+ * ปรับปีของวันที่ YYYY-MM-DD ให้ตรงกับปีการศึกษา (พ.ศ.) ที่เลือก โดยคงเดือนและวันเดิมไว้
+ * และหากตรงกับวันเสาร์-อาทิตย์ จะเลื่อนไปวันทำการจันทร์-ศุกร์ในเดือนเดียวกันอัตโนมัติ
+ */
+export function adjustDateToAcademicYear(
+  dateStr: string,
+  buddhistYearStr: string
+): string {
+  const parsedBy = parseInt(String(buddhistYearStr || "").trim(), 10);
+  if (!Number.isFinite(parsedBy) || parsedBy < 2400 || parsedBy > 2700) {
+    return dateStr || getInitialWeekdayDate();
+  }
+  const targetGregorianYear = parsedBy - 543;
+  const base = dateStr ? new Date(dateStr + "T00:00:00") : new Date();
+  const validBase = isNaN(base.getTime()) ? new Date() : base;
+
+  const month = validBase.getMonth();
+  const maxDayInMonth = new Date(targetGregorianYear, month + 1, 0).getDate();
+  const dayOfMonth = Math.min(validBase.getDate(), maxDayInMonth);
+
+  const dt = new Date(targetGregorianYear, month, dayOfMonth);
+  const dow = dt.getDay();
+  if (dow === 6) {
+    // วันเสาร์: ถ้าบวก 2 วันแล้วยังอยู่เดือนเดิมให้ไปวันจันทร์ มิฉะนั้นถอยไปวันศุกร์
+    if (dayOfMonth + 2 <= maxDayInMonth) {
+      dt.setDate(dayOfMonth + 2);
+    } else {
+      dt.setDate(dayOfMonth - 1);
+    }
+  } else if (dow === 0) {
+    // วันอาทิตย์: ถ้าบวก 1 วันแล้วยังอยู่เดือนเดิมให้ไปวันจันทร์ มิฉะนั้นถอยไปวันศุกร์
+    if (dayOfMonth + 1 <= maxDayInMonth) {
+      dt.setDate(dayOfMonth + 1);
+    } else {
+      dt.setDate(dayOfMonth - 2);
+    }
+  }
+
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}-${pad(dt.getDate())}`;
+}
+
 export function getDayName(dateStr: string): string {
   const idx = getDayIndex(dateStr);
   return idx >= 0 ? DAYS[idx] : "";
