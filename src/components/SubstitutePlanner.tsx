@@ -42,6 +42,7 @@ import {
   LEFT_SCHOOL_LOGO_URL,
   RIGHT_OBEC_LOGO_URL,
   chunkSubstituteRows,
+  ensureSarabunFontLoaded,
   exportSingleSubstitutePageImage,
   exportSubstituteDocument,
   renderPaperPagesToCanvases,
@@ -158,15 +159,18 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
       docRows.every((r) => r.n !== "-")
   );
 
-  // เมื่อฟอนต์ภาษาไทยโหลดเสร็จบน iOS Safari / Messenger WebView ให้สั่งวาด Canvas ใหม่อีกครั้งเพื่อให้ฟอนต์คมชัด 100%
+  // เมื่อฟอนต์ราชการ THSarabunNewWeb โหลดเสร็จทั้งบนคอมและมือถือ ให้สั่งวาด Canvas ใหม่เพื่อให้หน้าตาเหมือนกันเป๊ะ 100%
   useEffect(() => {
     if (typeof document === "undefined" || !document.fonts) return;
+    let mounted = true;
     const handleFontLoaded = () => {
-      setFontReadyTick((t) => t + 1);
+      if (mounted) setFontReadyTick((t) => t + 1);
     };
+    ensureSarabunFontLoaded().then(handleFontLoaded).catch(() => {});
     document.fonts.ready.then(handleFontLoaded).catch(() => {});
     document.fonts.addEventListener?.("loadingdone", handleFontLoaded);
     return () => {
+      mounted = false;
       document.fonts.removeEventListener?.("loadingdone", handleFontLoaded);
     };
   }, []);

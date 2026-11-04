@@ -173,30 +173,61 @@ function wrapCanvasText(
   return lines.length ? lines : [str];
 }
 
+let cachedFontLoadPromise: Promise<void> | null = null;
+
 /**
- * บังคับโหลดชุดตัวอักษรภาษาไทย (Thai Unicode Subset) ของฟอนต์ Sarabun บน iOS Safari / WebKit
+ * บังคับโหลดฟอนต์ราชการไทย THSarabunNew (Regular 400 & Bold 700) จากไฟล์ในระบบ (/fonts/THSarabunNew.ttf)
+ * เพื่อให้การวาดลงบน HTML5 Canvas ทั้งในคอมพิวเตอร์ (Windows/Mac) และโทรศัพท์มือถือ (iOS/Android)
+ * มีขนาดตัวอักษร ความหนา และสัดส่วนเหมือนแบบฟอร์มราชการ (รูปที่ 1) เหมือนกันเป๊ะ 100% ทุกอุปกรณ์
  */
 export async function ensureSarabunFontLoaded(): Promise<void> {
   if (typeof document === "undefined" || !document.fonts) return;
-  try {
-    await Promise.all([
-      document.fonts.load("400 15px 'Sarabun'", THAI_FONT_SAMPLE),
-      document.fonts.load("600 15px 'Sarabun'", THAI_FONT_SAMPLE),
-      document.fonts.load("700 15px 'Sarabun'", THAI_FONT_SAMPLE),
-      document.fonts.load("700 19px 'Sarabun'", THAI_SAMPLE_SHORT),
-      document.fonts.load("700 20px 'Sarabun'", THAI_SAMPLE_SHORT),
-    ]);
-    await document.fonts.ready;
 
-    for (let attempt = 0; attempt < 12; attempt++) {
-      if (document.fonts.check("400 15px 'Sarabun'", "แบบบันทึกการจัดสอนแทน")) {
-        break;
+  if (!cachedFontLoadPromise) {
+    cachedFontLoadPromise = (async () => {
+      try {
+        if (typeof FontFace !== "undefined") {
+          const regularFace = new FontFace(
+            "THSarabunNewWeb",
+            "url(/fonts/THSarabunNew.ttf)",
+            { weight: "400", style: "normal" }
+          );
+          const boldFace = new FontFace(
+            "THSarabunNewWeb",
+            "url(/fonts/THSarabunNew-Bold.ttf)",
+            { weight: "700", style: "normal" }
+          );
+          const [loadedRegular, loadedBold] = await Promise.all([
+            regularFace.load(),
+            boldFace.load(),
+          ]);
+          document.fonts.add(loadedRegular);
+          document.fonts.add(loadedBold);
+        }
+
+        await Promise.all([
+          document.fonts.load("400 21.3px 'THSarabunNewWeb'", THAI_FONT_SAMPLE),
+          document.fonts.load("700 21.3px 'THSarabunNewWeb'", THAI_FONT_SAMPLE),
+          document.fonts.load("700 26.7px 'THSarabunNewWeb'", THAI_SAMPLE_SHORT),
+        ]);
+        await document.fonts.ready;
+
+        for (let attempt = 0; attempt < 15; attempt++) {
+          if (
+            document.fonts.check("400 21.3px 'THSarabunNewWeb'", "แบบบันทึกการจัดสอนแทน") &&
+            document.fonts.check("700 26.7px 'THSarabunNewWeb'", "แบบบันทึกการจัดสอนแทน")
+          ) {
+            break;
+          }
+          await new Promise((r) => setTimeout(r, 80));
+        }
+      } catch {
+        // Proceed if FontFace API is restricted
       }
-      await new Promise((r) => setTimeout(r, 100));
-    }
-  } catch {
-    // Proceed if font loading API is restricted
+    })();
   }
+
+  await cachedFontLoadPromise;
 }
 
 function drawFittedCellLine(
@@ -238,11 +269,11 @@ function resolveRowAbsentTeacherName(row: SubstituteRow, absentTeacher: TeacherR
  * - โลโก้ขวา: ตราองค์กร/สพฐ. หมายเลข 1 (/assets/aistudio/______2_edcf2277.jpg)
  * - ตาราง 10 คอลัมน์: ที่ | ชื่อ-สกุล ผู้สอนแทน | สอนแทน | คาบที่ | ห้อง | วิชา | รหัสวิชา | วันที่ | ลงชื่อ | หมายเหตุ
  * - กล่องลงนาม 2 กล่องตีกรอบสี่เหลี่ยมด้านล่าง:
- *     กล่องซ้าย: (นายรณสิทธิ์ ประดับศรี) งานการจัดการเรียนการสอน
+ *     กล่องซ้าย: (นายธีระพงษ์ หาวัน) งานการจัดการเรียนการสอน
  *     กล่องขวา: (นายสุทธิศักดิ์ เกตษา) ผู้ช่วยผู้อำนวยการโรงเรียนวรคุณอุปถัมภ์
  */
 export const TH_SARABUN_FONT_STACK =
-  "'TH Sarabun PSK', 'THSarabunPSK', 'TH Sarabun New', 'Sarabun', sans-serif";
+  "'THSarabunNewWeb', 'TH Sarabun PSK', 'THSarabunPSK', 'TH Sarabun New', sans-serif";
 
 /**
  * แบ่งแถวคาบสอนแทนออกเป็นหน้าๆ โดยอิงจากขอบกระดาษ A4 แนวนอน (เอกสารราชการ)

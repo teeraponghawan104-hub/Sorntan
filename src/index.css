@@ -1,6 +1,54 @@
 @import "tailwindcss";
 @custom-variant dark (&:where(.dark, .dark *));
 
+@font-face {
+  font-family: "THSarabunNewWeb";
+  src: url("/fonts/THSarabunNew.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: block;
+}
+
+@font-face {
+  font-family: "THSarabunNewWeb";
+  src: url("/fonts/THSarabunNew-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: block;
+}
+
+@font-face {
+  font-family: "TH Sarabun PSK";
+  src: url("/fonts/THSarabunNew.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: block;
+}
+
+@font-face {
+  font-family: "TH Sarabun PSK";
+  src: url("/fonts/THSarabunNew-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: block;
+}
+
+@font-face {
+  font-family: "TH Sarabun New";
+  src: url("/fonts/THSarabunNew.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: block;
+}
+
+@font-face {
+  font-family: "TH Sarabun New";
+  src: url("/fonts/THSarabunNew-Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: block;
+}
+
 @layer base {
   html,
   body {
@@ -13,7 +61,7 @@
 }
 
 .paper-sheet {
-  font-family: "Sarabun", sans-serif;
+  font-family: "THSarabunNewWeb", "TH Sarabun PSK", "TH Sarabun New", sans-serif;
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
 }
