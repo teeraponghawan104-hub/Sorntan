@@ -594,6 +594,45 @@ test("System-wide integrity: all course codes resolve to valid Thai subject name
   }
 });
 
+test("Continuous period (คาบต่อเนื่อง) priority: when a teacher teaches a classroom in period p-1 (e.g. Math) and the period p teacher (e.g. Science) is absent, if the period p-1 teacher is free in period p, they are prioritized #1", async () => {
+  const { getContinuousPeriodInfo, doesTeacherTeachPrevPeriodExactClass } = await import("./scheduler");
+
+  // Case 1: Tuesday (2026-11-03) Period 3 -> Period 4 in class 5/1
+  // Period 3 (p=2): 201 ครูอำมาลา เกตษา (คณิตศาสตร์) teaches ค32102 5/1, and is FREE in Period 4 (p=3)
+  // Period 4 (p=3): 301 ครูเมธาวี สายสิน (ฟิสิกส์/วิทยาศาสตร์) teaches ว32204 5/1
+  const t201 = TEACHERS.find((t) => t.id === 201)!;
+  assert.equal(doesTeacherTeachPrevPeriodExactClass(t201, "2026-11-03", 3, "5/1"), true);
+  const cont201TueP4 = getContinuousPeriodInfo(t201, "2026-11-03", 3, "5/1");
+  assert.equal(cont201TueP4.isPrevContinuous, true);
+  assert.equal(cont201TueP4.prevPeriodNumber, 3);
+  assert.equal(cont201TueP4.prevCourseCode, "ค32102");
+  assert.equal(cont201TueP4.prevSubjectName, "คณิตศาสตร์พื้นฐาน");
+
+  const cands301TueP4 = getCandidateTeachers(301, "2026-11-03", 3);
+  assert.equal(cands301TueP4[0].id, 201, "201 (Math teacher from P3 in 5/1) must be ranked #1 for 301 (Science P4 in 5/1)");
+  const asg301Tue = autoAssignSubstitutes(301, "2026-11-03");
+  assert.equal(asg301Tue[2], "t305"); // P3 (4/1): 305 taught ว31102 4/1 in P2 and is free in P3 -> continuous period!
+  assert.equal(asg301Tue[3], "t201"); // P4 (5/1): 201 taught ค32102 5/1 in P3 and is free in P4 -> continuous period!
+
+  // Case 2: Friday (2026-11-06) Period 3 -> Period 4 in class 5/1
+  // Period 3 (p=2): 204 ครูปฐมาวดี มะโนรัตน์ (คณิตศาสตร์) teaches ค32202-พต 5/1, and is FREE in Period 4 (p=3)
+  // Period 4 (p=3): 301 ครูเมธาวี สายสิน (วิทยาศาสตร์) teaches ว32102 5/1
+  const t204 = TEACHERS.find((t) => t.id === 204)!;
+  assert.equal(doesTeacherTeachPrevPeriodExactClass(t204, "2026-11-06", 3, "5/1"), true);
+  const cands301FriP4 = getCandidateTeachers(301, "2026-11-06", 3);
+  assert.equal(cands301FriP4[0].id, 204, "204 (Math teacher from P3 in 5/1) must be ranked #1 for 301 (Science P4 in 5/1)");
+  const asg301Fri = autoAssignSubstitutes(301, "2026-11-06");
+  assert.equal(asg301Fri[2], "t303"); // P3 (4/1): 303 taught ว31222 4/1 in P2 and is free in P3 -> continuous period!
+  assert.equal(asg301Fri[3], "t204"); // P4 (5/1): 204 taught ค32202-พต 5/1 in P3 and is free in P4 -> continuous period!
+  assert.equal(asg301Fri[4], "t601"); // P5 (5/2): 601 taught ศ23102 5/2 in P4 and is free in P5 -> continuous period!
+
+  // Case 3: Friday (2026-11-06) Period 2 -> Period 3 in class 4/2
+  // Period 2 (p=1): 203 ที่ ร.ต.เพ็ง แซ่กัง (คณิตศาสตร์) teaches ค31102 4/2, and is FREE in Period 3 (p=2)
+  // Period 3 (p=2): 306 ครูณัฐกร ขุนพันธ์ (วิทยาศาสตร์/คอมพิวเตอร์) teaches ว30274 4/2
+  const asg306Fri = autoAssignSubstitutes(306, "2026-11-06");
+  assert.equal(asg306Fri[2], "t203"); // P3 (4/2): 203 taught ค31102 4/2 in P2 and is free in P3 -> continuous period!
+});
+
 
 
 

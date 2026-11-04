@@ -21,6 +21,7 @@ import {
   buildCombinedTeacherHeader,
   doesTeacherTeachExactClass,
   doesTeacherTeachGrade,
+  doesTeacherTeachPrevPeriodExactClass,
   extractGradeLevel,
   formatClassLevelLabel,
   formatCleanSubstituteName,
@@ -31,6 +32,7 @@ import {
   formatThaiMonthYearHeader,
   getCandidateTeachers,
   getCombinedTeacherClasses,
+  getContinuousPeriodInfo,
   getDayIndex,
   getSlotAssignment,
   getSubjectNameFromCourse,
@@ -657,21 +659,38 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                 const gradeNum = extractGradeLevel(slot.cls);
                 const gradeLabel = gradeNum ? `ม.${gradeNum}` : slot.cls;
 
+                const prevContinuousRegular = candidates.filter(
+                  (c) =>
+                    !c.isStudentTeacher &&
+                    doesTeacherTeachPrevPeriodExactClass(
+                      c,
+                      selectedDate,
+                      slot.p,
+                      slot.cls
+                    )
+                );
+                const prevContinuousIds = new Set(
+                  prevContinuousRegular.map((c) => c.id)
+                );
+
                 const sameGradeSameGroupRegular = candidates.filter(
                   (c) =>
                     !c.isStudentTeacher &&
+                    !prevContinuousIds.has(c.id) &&
                     doesTeacherTeachGrade(c, slot.cls) &&
                     c.g === slot.absentTeacherGroup
                 );
                 const sameGradeOtherGroupRegular = candidates.filter(
                   (c) =>
                     !c.isStudentTeacher &&
+                    !prevContinuousIds.has(c.id) &&
                     doesTeacherTeachGrade(c, slot.cls) &&
                     c.g !== slot.absentTeacherGroup
                 );
                 const otherGradeSameGroupRegular = candidates.filter(
                   (c) =>
                     !c.isStudentTeacher &&
+                    !prevContinuousIds.has(c.id) &&
                     !doesTeacherTeachGrade(c, slot.cls) &&
                     c.g === slot.absentTeacherGroup
                 );
@@ -681,6 +700,7 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                 const otherGradeOtherGroupRegular = candidates.filter(
                   (c) =>
                     !c.isStudentTeacher &&
+                    !prevContinuousIds.has(c.id) &&
                     !doesTeacherTeachGrade(c, slot.cls) &&
                     c.g !== slot.absentTeacherGroup
                 );
@@ -720,6 +740,25 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                       }
                       className="w-full max-w-full px-2.5 py-1.5 rounded-md border border-[#c9d4ec] dark:border-[#2a3a6e] bg-white dark:bg-[#0b1330] text-[#0f2150] dark:text-[#e9eefc] text-sm sm:text-base focus:outline-2 focus:outline-[#f2c230]"
                     >
+                      {prevContinuousRegular.length > 0 && (
+                        <optgroup
+                          label={`★ คาบต่อเนื่อง · เพิ่งสอน ม.${slot.cls} ในคาบที่ ${slot.p} และว่างคาบนี้ (${prevContinuousRegular.length} ท่าน)`}
+                        >
+                          {prevContinuousRegular.map((t) => {
+                            const contInfo = getContinuousPeriodInfo(
+                              t,
+                              selectedDate,
+                              slot.p,
+                              slot.cls
+                            );
+                            return (
+                              <option key={t.id} value={`t${t.id}`}>
+                                {t.id} {t.n} (สอนต่อเนื่อง ม.{slot.cls} จากคาบ {contInfo.prevPeriodNumber} วิชา{contInfo.prevSubjectName} · {t.pdfGroup})
+                              </option>
+                            );
+                          })}
+                        </optgroup>
+                      )}
                       {sameGradeSameGroupRegular.length > 0 && (
                         <optgroup
                           label={`1. ครูระดับชั้นเดียวกัน (${gradeLabel}) · กลุ่มสาระเดียวกัน (${sameGradeSameGroupRegular.length} ท่าน)`}
@@ -764,14 +803,22 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                           label={`4. นักศึกษาฝึกสอนที่ว่างในคาบนี้ (${freeStudentTeachers.length} ท่าน)`}
                         >
                           {freeStudentTeachers.map((t) => {
+                            const stCont = getContinuousPeriodInfo(
+                              t,
+                              selectedDate,
+                              slot.p,
+                              slot.cls
+                            );
                             const stSameGrade = doesTeacherTeachGrade(t, slot.cls);
                             const stExact = doesTeacherTeachExactClass(t, slot.cls);
                             return (
                               <option key={t.id} value={`t${t.id}`}>
                                 {t.id} {t.n} (นศ.ฝึกสอน ·{" "}
-                                {stSameGrade
-                                  ? `สอน ${stExact ? `ม.${slot.cls}` : gradeLabel} · `
-                                  : `สอน ${formatTeacherGradesSummary(t)} · `}
+                                {stCont.isPrevContinuous
+                                  ? `สอนต่อเนื่อง ม.${slot.cls} จากคาบ ${stCont.prevPeriodNumber} · `
+                                  : stSameGrade
+                                    ? `สอน ${stExact ? `ม.${slot.cls}` : gradeLabel} · `
+                                    : `สอน ${formatTeacherGradesSummary(t)} · `}
                                 {t.pdfGroup})
                               </option>
                             );

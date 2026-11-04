@@ -424,13 +424,115 @@ export function doesTeacherTeachExactClass(
   return getTeacherTaughtClassRooms(teacher).has(targetRoom);
 }
 
+export interface ContinuousPeriodInfo {
+  isPrevContinuous: boolean;       // เพิ่งสอนห้องเดียวกันนี้ในคาบก่อนหน้า (p - 1)
+  prevPeriodNumber: number | null; // หมายเลขคาบก่อนหน้า (1..6)
+  prevCourseCode: string;          // รหัสวิชาที่สอนในคาบก่อนหน้า
+  prevSubjectName: string;         // ชื่อวิชาที่สอนในคาบก่อนหน้า
+  isNextContinuous: boolean;       // มีสอนห้องเดียวกันนี้ต่อในคาบถัดไป (p + 1)
+  nextPeriodNumber: number | null; // หมายเลขคาบถัดไป (2..7)
+  nextCourseCode: string;          // รหัสวิชาที่สอนในคาบถัดไป
+  nextSubjectName: string;         // ชื่อวิชาที่สอนในคาบถัดไป
+}
+
+/**
+ * ตรวจสอบข้อมูลคาบสอนต่อเนื่องในห้องเรียนเดียวกัน (targetClass) ของครูในวันที่เลือก
+ * เช่น คาบที่ 3 ครูสอนคณิตศาสตร์ ม.5/1 อยู่ แล้วคาบที่ 4 ครูวิทย์ ม.5/1 ไม่อยู่ และครูคณิตว่างในคาบที่ 4
+ */
+export function getContinuousPeriodInfo(
+  teacher: TeacherRecord | undefined,
+  dateStr: string,
+  periodIndex: number,
+  targetClass: string | undefined
+): ContinuousPeriodInfo {
+  const empty: ContinuousPeriodInfo = {
+    isPrevContinuous: false,
+    prevPeriodNumber: null,
+    prevCourseCode: "",
+    prevSubjectName: "",
+    isNextContinuous: false,
+    nextPeriodNumber: null,
+    nextCourseCode: "",
+    nextSubjectName: "",
+  };
+
+  if (!teacher || !dateStr || !targetClass) return empty;
+  const dayIdx = getDayIndex(dateStr);
+  const targetRoom = normalizeClassRoom(targetClass);
+  if (dayIdx < 0 || !targetRoom) return empty;
+
+  let isPrevContinuous = false;
+  let prevPeriodNumber: number | null = null;
+  let prevCourseCode = "";
+  let prevSubjectName = "";
+
+  if (periodIndex > 0) {
+    const prevRaw = teacher.d?.[dayIdx]?.[periodIndex - 1] || "";
+    const parsedPrev = parseScheduleCell(prevRaw, teacher.r);
+    if (
+      parsedPrev.isTeachable &&
+      parsedPrev.code !== "เลือกเสรี" &&
+      normalizeClassRoom(parsedPrev.cls) === targetRoom
+    ) {
+      isPrevContinuous = true;
+      prevPeriodNumber = periodIndex; // periodIndex - 1 in 0-based is periodIndex in 1-based
+      prevCourseCode = parsedPrev.code;
+      prevSubjectName = getSubjectNameFromCourse(parsedPrev.code, teacher.pdfGroup, teacher.id);
+    }
+  }
+
+  let isNextContinuous = false;
+  let nextPeriodNumber: number | null = null;
+  let nextCourseCode = "";
+  let nextSubjectName = "";
+
+  if (periodIndex >= 0 && periodIndex < 6) {
+    const nextRaw = teacher.d?.[dayIdx]?.[periodIndex + 1] || "";
+    const parsedNext = parseScheduleCell(nextRaw, teacher.r);
+    if (
+      parsedNext.isTeachable &&
+      parsedNext.code !== "เลือกเสรี" &&
+      normalizeClassRoom(parsedNext.cls) === targetRoom
+    ) {
+      isNextContinuous = true;
+      nextPeriodNumber = periodIndex + 2; // periodIndex + 1 in 0-based is periodIndex + 2 in 1-based
+      nextCourseCode = parsedNext.code;
+      nextSubjectName = getSubjectNameFromCourse(parsedNext.code, teacher.pdfGroup, teacher.id);
+    }
+  }
+
+  return {
+    isPrevContinuous,
+    prevPeriodNumber,
+    prevCourseCode,
+    prevSubjectName,
+    isNextContinuous,
+    nextPeriodNumber,
+    nextCourseCode,
+    nextSubjectName,
+  };
+}
+
+/**
+ * ตรวจสอบว่าครูท่านนี้เพิ่งสอนห้องเรียนเดียวกัน (targetClass) ในคาบก่อนหน้า (periodIndex - 1) หรือไม่
+ */
+export function doesTeacherTeachPrevPeriodExactClass(
+  teacher: TeacherRecord | undefined,
+  dateStr: string,
+  periodIndex: number,
+  targetClass: string | undefined
+): boolean {
+  return getContinuousPeriodInfo(teacher, dateStr, periodIndex, targetClass).isPrevContinuous;
+}
+
 /**
  * ค้นหาครูและนักศึกษาฝึกสอนที่ว่างในวันและคาบที่กำหนด
- * เรียงลำดับโดยคำนึงถึงครูที่สอนในระดับชั้นเดียวกันเป็นหลัก แล้วค่อยเรียงตามกลุ่มสาระ:
+ * เรียงลำดับความสำคัญ:
+ * 0) ครูประจำการที่เพิ่งสอนห้องเรียนนี้ในคาบก่อนหน้า (p - 1) และว่างในคาบนี้ (ให้คาบต่อเนื่องได้เลย)
  * 1) ครูประจำการที่สอนระดับชั้นเดียวกัน และอยู่กลุ่มสาระเดียวกัน (!isStudentTeacher && sameGrade && sameGroup)
  * 2) ครูประจำการที่สอนระดับชั้นเดียวกัน (ต่างกลุ่มสาระ) (!isStudentTeacher && sameGrade && !sameGroup)
  * 3) ครูประจำการในกลุ่มสาระเดียวกัน (ที่สอนระดับชั้นอื่น) (!isStudentTeacher && !sameGrade && sameGroup)
- * 4) นักศึกษาฝึกสอนที่ว่างในคาบนั้น (isStudentTeacher) โดยเรียงตามระดับชั้นเดียวกัน แล้วตามกลุ่มสาระเดียวกัน
+ * 4) นักศึกษาฝึกสอนที่ว่างในคาบนั้น (isStudentTeacher) โดยเรียงตามคาบต่อเนื่องห้องเดิม -> ระดับชั้นเดียวกัน -> กลุ่มสาระเดียวกัน
  * 5) ครูประจำการท่านอื่นที่ว่าง (ต่างระดับชั้น และต่างกลุ่มสาระ)
  *
  * โดยตัดรายชื่อครูที่ลาในวันเดียวกัน (excludedTeacherIds), ผู้บริหารสถานศึกษา
@@ -467,16 +569,24 @@ export function getCandidateTeachers(
     return cell.trim() === "";
   }).sort((m, n) => {
     const tier = (u: TeacherRecord) => {
+      const prevContinuous = doesTeacherTeachPrevPeriodExactClass(
+        u,
+        dateStr,
+        periodIndex,
+        effectiveTargetClass
+      );
       const sameGrade = doesTeacherTeachGrade(u, effectiveTargetClass);
       const sameGroup = u.g === absentTeacher.g;
-      if (!u.isStudentTeacher && sameGrade && sameGroup) return 1; // ครูระดับชั้นเดียวกัน + กลุ่มสาระเดียวกัน
+      if (!u.isStudentTeacher && prevContinuous) return 0;          // ครูประจำการที่เพิ่งสอนห้องนี้ในคาบก่อนหน้า (คาบต่อเนื่อง)
+      if (!u.isStudentTeacher && sameGrade && sameGroup) return 1;  // ครูระดับชั้นเดียวกัน + กลุ่มสาระเดียวกัน
       if (!u.isStudentTeacher && sameGrade && !sameGroup) return 2; // ครูระดับชั้นเดียวกัน + ต่างกลุ่มสาระ
       if (!u.isStudentTeacher && !sameGrade && sameGroup) return 3; // ครูกลุ่มสาระเดียวกัน (ระดับชั้นอื่น)
-      if (u.isStudentTeacher && sameGrade && sameGroup) return 4;  // นศ.ฝึกสอนระดับชั้นเดียวกัน + กลุ่มสาระเดียวกัน
-      if (u.isStudentTeacher && sameGrade && !sameGroup) return 5;  // นศ.ฝึกสอนระดับชั้นเดียวกัน + ต่างกลุ่มสาระ
-      if (u.isStudentTeacher && !sameGrade && sameGroup) return 6;  // นศ.ฝึกสอนกลุ่มสาระเดียวกัน
-      if (u.isStudentTeacher) return 7;                             // นศ.ฝึกสอนกลุ่มสาระอื่น
-      return 8;                                                     // ครูต่างระดับชั้น + ต่างกลุ่มสาระ
+      if (u.isStudentTeacher && prevContinuous) return 4;           // นศ.ฝึกสอนที่เพิ่งสอนห้องนี้ในคาบก่อนหน้า (คาบต่อเนื่อง)
+      if (u.isStudentTeacher && sameGrade && sameGroup) return 5;   // นศ.ฝึกสอนระดับชั้นเดียวกัน + กลุ่มสาระเดียวกัน
+      if (u.isStudentTeacher && sameGrade && !sameGroup) return 6;  // นศ.ฝึกสอนระดับชั้นเดียวกัน + ต่างกลุ่มสาระ
+      if (u.isStudentTeacher && !sameGrade && sameGroup) return 7;  // นศ.ฝึกสอนกลุ่มสาระเดียวกัน
+      if (u.isStudentTeacher) return 8;                             // นศ.ฝึกสอนกลุ่มสาระอื่น
+      return 9;                                                     // ครูต่างระดับชั้น + ต่างกลุ่มสาระ
     };
     const tierDiff = tier(m) - tier(n);
     if (tierDiff !== 0) return tierDiff;
@@ -484,6 +594,10 @@ export function getCandidateTeachers(
     const mExactClass = doesTeacherTeachExactClass(m, effectiveTargetClass) ? 1 : 0;
     const nExactClass = doesTeacherTeachExactClass(n, effectiveTargetClass) ? 1 : 0;
     if (nExactClass !== mExactClass) return nExactClass - mExactClass;
+
+    const mSameGroup = m.g === absentTeacher.g ? 1 : 0;
+    const nSameGroup = n.g === absentTeacher.g ? 1 : 0;
+    if (nSameGroup !== mSameGroup) return nSameGroup - mSameGroup;
 
     const mSameSub = m.pdfGroup === absentTeacher.pdfGroup ? 1 : 0;
     const nSameSub = n.pdfGroup === absentTeacher.pdfGroup ? 1 : 0;
@@ -495,10 +609,11 @@ export function getCandidateTeachers(
 
 /**
  * เลือกผู้สอนแทนที่เหมาะสมที่สุดในคาบเรียนตามลำดับความสำคัญ:
+ * 0) ครูประจำการที่เพิ่งสอนห้องเรียนนี้ (targetClass) ในคาบก่อนหน้า (p - 1) และว่างในคาบนี้ (ให้คาบต่อเนื่องได้เลย)
  * 1) ครูประจำการที่สอนระดับชั้นเดียวกัน + กลุ่มสาระเดียวกัน
  * 2) ครูประจำการที่สอนระดับชั้นเดียวกัน (ต่างกลุ่มสาระ)
  * 3) ครูประจำการในกลุ่มสาระเดียวกัน (ระดับชั้นอื่น)
- * 4) นักศึกษาฝึกสอนที่ว่าง (เรียงตามระดับชั้นเดียวกัน -> กลุ่มสาระเดียวกัน)
+ * 4) นักศึกษาฝึกสอนที่ว่าง (เรียงตามคาบต่อเนื่องห้องเดิม -> ระดับชั้นเดียวกัน -> กลุ่มสาระเดียวกัน)
  * 5) ครูประจำการท่านอื่นที่ว่าง (ต่างระดับชั้น + ต่างกลุ่มสาระ)
  */
 function pickBestSubstituteForSlot(
@@ -506,7 +621,9 @@ function pickBestSubstituteForSlot(
   targetClass: string,
   absentGroup: string,
   absentPdfGroup: string,
-  assignedCount: Record<number, number>
+  assignedCount: Record<number, number>,
+  dateStr?: string,
+  periodIndex?: number
 ): TeacherRecord | undefined {
   const compareCandidates = (m: TeacherRecord, n: TeacherRecord) => {
     const countDiff = (assignedCount[m.id] || 0) - (assignedCount[n.id] || 0);
@@ -522,6 +639,23 @@ function pickBestSubstituteForSlot(
 
     return m.id - n.id;
   };
+
+  // 0. ครูประจำการที่เพิ่งสอนห้องเรียนนี้ในคาบก่อนหน้า (p - 1) และว่างในคาบนี้ (ให้คาบต่อเนื่องได้เลย)
+  if (dateStr && typeof periodIndex === "number" && periodIndex > 0) {
+    const prevContinuousRegular = allFree
+      .filter(
+        (u) =>
+          !u.isStudentTeacher &&
+          doesTeacherTeachPrevPeriodExactClass(u, dateStr, periodIndex, targetClass)
+      )
+      .sort((m, n) => {
+        const mSameG = m.g === absentGroup ? 1 : 0;
+        const nSameG = n.g === absentGroup ? 1 : 0;
+        if (nSameG !== mSameG) return nSameG - mSameG;
+        return compareCandidates(m, n);
+      });
+    if (prevContinuousRegular[0]) return prevContinuousRegular[0];
+  }
 
   // 1. ครูประจำการที่สอนในระดับชั้นเดียวกัน และอยู่กลุ่มสาระเดียวกัน
   const sameGradeSameDept = allFree
@@ -556,10 +690,16 @@ function pickBestSubstituteForSlot(
     .sort(compareCandidates);
   if (otherGradeSameDept[0]) return otherGradeSameDept[0];
 
-  // 4. นักศึกษาฝึกสอนที่ว่างในคาบนั้น (เรียงระดับชั้นเดียวกันก่อน แล้วตามกลุ่มสาระเดียวกัน)
+  // 4. นักศึกษาฝึกสอนที่ว่างในคาบนั้น (เรียงคาบต่อเนื่องห้องเดิม -> ระดับชั้นเดียวกัน -> กลุ่มสาระเดียวกัน)
   const freeStudentTeachers = allFree
     .filter((u) => Boolean(u.isStudentTeacher))
     .sort((m, n) => {
+      if (dateStr && typeof periodIndex === "number" && periodIndex > 0) {
+        const mPrevCont = doesTeacherTeachPrevPeriodExactClass(m, dateStr, periodIndex, targetClass) ? 1 : 0;
+        const nPrevCont = doesTeacherTeachPrevPeriodExactClass(n, dateStr, periodIndex, targetClass) ? 1 : 0;
+        if (nPrevCont !== mPrevCont) return nPrevCont - mPrevCont;
+      }
+
       const mSameGrade = doesTeacherTeachGrade(m, targetClass) ? 1 : 0;
       const nSameGrade = doesTeacherTeachGrade(n, targetClass) ? 1 : 0;
       if (nSameGrade !== mSameGrade) return nSameGrade - mSameGrade;
@@ -588,7 +728,7 @@ function pickBestSubstituteForSlot(
 
 /**
  * จัดครูสอนแทนอัตโนมัติสำหรับครู 1 ท่าน (รองรับการตัดครูท่านอื่นที่ลาในวันเดียวกันออก)
- * โดยคำนึงถึงครูที่สอนในระดับชั้นเดียวกันเป็นหลัก แล้วค่อยเรียงตามกลุ่มสาระ
+ * โดยให้คาบต่อเนื่องเป็นอันดับแรก หากครูที่สอนห้องนั้นในคาบก่อนหน้าว่าง แล้วคำนึงถึงครูในระดับชั้นเดียวกันและกลุ่มสาระ
  */
 export function autoAssignSubstitutes(
   absentTeacherId: string | number,
@@ -622,7 +762,9 @@ export function autoAssignSubstitutes(
       slot.cls,
       absentTeacher.g,
       absentTeacher.pdfGroup,
-      assignedCount
+      assignedCount,
+      dateStr,
+      slot.p
     );
 
     if (chosen) {
@@ -644,6 +786,7 @@ export function autoAssignSubstitutes(
 
 /**
  * จัดครูสอนแทนอัตโนมัติลงในตารางเดียวกัน (สำหรับครูลา 1 ท่าน หรือหลายท่านในใบเดียวกัน)
+ * - ให้คาบต่อเนื่องเป็นอันดับแรก หากครูที่สอนห้องนั้นในคาบก่อนหน้าว่าง
  * - คำนึงถึงครูที่สอนในระดับชั้นเดียวกันเป็นหลัก แล้วค่อยเรียงตามกลุ่มสาระ
  * - ตัดชื่อครูที่ลาทุกคนออกจากผู้สอนแทน
  * - ป้องกันไม่ให้จัดผู้สอนแทนคนเดียวกันซ้ำในคาบเรียนเดียวกัน (No Double-Booking)
@@ -683,7 +826,9 @@ export function autoAssignCombinedSubstitutes(
       slot.cls,
       slot.absentTeacherGroup,
       slot.absentTeacherPdfGroup,
-      assignedCount
+      assignedCount,
+      dateStr,
+      slot.p
     );
 
     if (chosen) {
