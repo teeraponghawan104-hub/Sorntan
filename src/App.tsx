@@ -113,6 +113,7 @@ export default function App() {
     );
 
     let seededOnce = false;
+    let migrated305Once = false;
     const unsubTeachers = onSnapshot(
       teachersQuery,
       (snapshot) => {
@@ -124,7 +125,7 @@ export default function App() {
           return;
         }
         if (!snapshot.empty) {
-          const cloudTeachers: TeacherRecord[] = [];
+          let cloudTeachers: TeacherRecord[] = [];
           snapshot.forEach((docSnap) => {
             const d = docSnap.data();
             cloudTeachers.push({
@@ -142,6 +143,35 @@ export default function App() {
               isStudentTeacher: Boolean(d.isStudentTeacher),
             });
           });
+
+          // อัปเดตอัตโนมัติ: โอนคาบสอนของ 302 (ครูรณสิทธิ์ ประดับศรี) ไปให้ 305 (ครูศักดิ์ชัย แสงมาศ) ทั้งหมดโดยตัดคาบประจำเดิมของ 305 ออกก่อน
+          const cloud305 = cloudTeachers.find((t) => t.id === 305);
+          const cloud302 = cloudTeachers.find((t) => t.id === 302);
+          const init305 = INITIAL_TEACHERS.find((t) => t.id === 305);
+          const init302 = INITIAL_TEACHERS.find((t) => t.id === 302);
+
+          if (
+            init305 &&
+            init302 &&
+            ((cloud305 &&
+              (!cloud305.s.includes("ว31242") ||
+                cloud305.s.includes("ว21102") ||
+                cloud305.r !== init305.r)) ||
+              (cloud302 && cloud302.s.includes("ว31242")))
+          ) {
+            cloudTeachers = cloudTeachers.map((t) => {
+              if (t.id === 305) return { ...init305 };
+              if (t.id === 302) return { ...init302 };
+              return t;
+            });
+            if (!migrated305Once) {
+              migrated305Once = true;
+              syncAllTeachersToCloud(cloudTeachers).catch((err) => {
+                console.error("Failed to sync migrated 302/305 schedules:", err);
+              });
+            }
+          }
+
           const updated = saveLocalTeachers(cloudTeachers);
           setTeachers(updated);
         }
@@ -421,7 +451,8 @@ export default function App() {
   };
 
   const handleSelectTeacherFromDirectory = (teacherId: number) => {
-    const idStr = String(teacherId);
+    const effectiveTeacherId = teacherId === 302 ? 305 : teacherId;
+    const idStr = String(effectiveTeacherId);
     const nextIds = [idStr];
     const nextAssignments = autoAssignCombinedSubstitutes(
       nextIds,

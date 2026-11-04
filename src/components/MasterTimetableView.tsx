@@ -260,6 +260,16 @@ export const MasterTimetableView: React.FC<MasterTimetableViewProps> = ({
                     ชื่อ-สกุล {teacher.id} {teacher.n}
                     {teacher.isStudentTeacher ? " (นักศึกษาฝึกสอน)" : ""} &nbsp;·&nbsp; จำนวนชั่วโมง{" "}
                     {teacher.totalHours}
+                    {teacher.id === 302 && (
+                      <span className="ml-2 inline-block px-2.5 py-0.5 text-xs font-bold rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200">
+                        ย้ายไป รร.อื่น · โอนคาบสอนให้ 305 ครูศักดิ์ชัย แสงมาศ ทั้งหมด
+                      </span>
+                    )}
+                    {teacher.id === 305 && (
+                      <span className="ml-2 inline-block px-2.5 py-0.5 text-xs font-bold rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-200">
+                        รวมคาบสอนจาก 302 ครูรณสิทธิ์ ประดับศรี ทั้งหมดแล้ว
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -278,7 +288,11 @@ export const MasterTimetableView: React.FC<MasterTimetableViewProps> = ({
                     className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg bg-[#1b4fb8] hover:bg-[#153e91] text-white text-xs sm:text-sm font-semibold transition-colors cursor-pointer whitespace-nowrap"
                   >
                     <UserCheck className="w-4 h-4" />
-                    <span>จัดสอนแทนครูท่านนี้</span>
+                    <span>
+                      {teacher.id === 302
+                        ? "จัดสอนแทน (ไปที่ 305 ครูศักดิ์ชัย)"
+                        : "จัดสอนแทนครูท่านนี้"}
+                    </span>
                   </button>
                 </div>
               </div>

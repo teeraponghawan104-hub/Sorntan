@@ -412,6 +412,71 @@ test("chunkSubstituteRows keeps <= 7 rows on a single page and cleanly paginates
   assert.equal(pages18[1].length, 4);
 });
 
+test("Teacher 305 (ครูศักดิ์ชัย แสงมาศ) holds ONLY the 13 transferred periods from 302 (ครูรณสิทธิ์ ประดับศรี) with old regular classes cut out", () => {
+  const t305 = TEACHERS.find((t) => t.id === 305);
+  assert.ok(t305);
+  assert.equal(t305.n, "ครูศักดิ์ชัย แสงมาศ");
+  assert.equal(t305.r, "ห้องชีวะ");
+  assert.equal(t305.totalHours, 20);
+
+  // Monday (2026-11-02): ONLY P3 ว31242 4/1, P4 ว31242 4/1, P5 ว33246 6/1 (old P1, P2, P6 classes cut out)
+  const mon305 = getTeacherClasses(305, "2026-11-02");
+  assert.equal(mon305.length, 3);
+  assert.deepEqual(
+    mon305.map((c) => `${c.p + 1}:${c.code}:${c.cls}:${c.room}`),
+    [
+      "3:ว31242:4/1:ห้องชีวะ",
+      "4:ว31242:4/1:ห้องชีวะ",
+      "5:ว33246:6/1:ห้องชีวะ",
+    ]
+  );
+
+  // Verify 305 is NOT in candidate teachers during the 13 transferred biology periods
+  const busySlots: [string, number][] = [
+    ["2026-11-02", 2], // Mon P3
+    ["2026-11-02", 3], // Mon P4
+    ["2026-11-02", 4], // Mon P5
+    ["2026-11-03", 0], // Tue P1
+    ["2026-11-03", 1], // Tue P2
+    ["2026-11-03", 4], // Tue P5
+    ["2026-11-04", 2], // Wed P3
+    ["2026-11-04", 3], // Wed P4
+    ["2026-11-05", 2], // Thu P3
+    ["2026-11-05", 3], // Thu P4
+    ["2026-11-05", 4], // Thu P5
+    ["2026-11-06", 0], // Fri P1
+    ["2026-11-06", 1], // Fri P2
+  ];
+
+  for (const [dateStr, pIdx] of busySlots) {
+    const cands = getCandidateTeachers(303, dateStr, pIdx).map((c) => c.id);
+    assert.equal(
+      cands.includes(305),
+      false,
+      `305 must NOT be free on ${dateStr} period ${pIdx + 1}`
+    );
+  }
+
+  // Verify 305 IS free during his former regular class slots (e.g. Mon P1, Mon P2, Mon P6, Tue P3, Tue P4, Tue P6)
+  const freeSlots: [string, number][] = [
+    ["2026-11-02", 0], // Mon P1
+    ["2026-11-02", 1], // Mon P2
+    ["2026-11-02", 5], // Mon P6
+    ["2026-11-03", 2], // Tue P3
+    ["2026-11-03", 3], // Tue P4
+    ["2026-11-03", 5], // Tue P6
+  ];
+  for (const [dateStr, pIdx] of freeSlots) {
+    const cands = getCandidateTeachers(303, dateStr, pIdx).map((c) => c.id);
+    assert.equal(
+      cands.includes(305),
+      true,
+      `305 SHOULD be free on ${dateStr} period ${pIdx + 1} now that old regular classes are cut`
+    );
+  }
+});
+
+
 
 
 

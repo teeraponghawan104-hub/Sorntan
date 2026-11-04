@@ -29,6 +29,7 @@ export const FreeTeacherFinder: React.FC<FreeTeacherFinderProps> = ({
   const studentCount = teachers.filter((t) => Boolean(t.isStudentTeacher)).length;
 
   const teachersInScope = teachers.filter((t) => {
+    if (t.id === 302) return false; // 302 ย้ายไปโรงเรียนอื่น (คาบสอนทั้งหมดไปอยู่กับ 305 ครูศักดิ์ชัย แสงมาศ)
     if (filterGroup === "ทั้งหมด") return true;
     if (filterGroup === "นักศึกษาฝึกสอน") return Boolean(t.isStudentTeacher);
     return t.g === filterGroup;
