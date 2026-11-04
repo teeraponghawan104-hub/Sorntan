@@ -633,9 +633,68 @@ test("Continuous period (คาบต่อเนื่อง) priority: when a 
   assert.equal(asg306Fri[2], "t203"); // P3 (4/2): 203 taught ค31102 4/2 in P2 and is free in P3 -> continuous period!
 });
 
+test("Word (.docx) export generates quickly, produces a compact file (< 200 KB), and has valid OpenXML layout matching the preview", async () => {
+  const JSZip = (await import("jszip")).default;
+  const { generateDocxBlob } = await import("./exportDoc");
 
+  const t305 = TEACHERS.find((t) => t.id === 305)!;
+  const dateStr = "2026-11-04";
+  const asg = autoAssignCombinedSubstitutes([305], dateStr);
+  const rows = buildCombinedDocumentRows([305], dateStr, asg, "");
 
+  const startMs = Date.now();
+  const blob = await generateDocxBlob(t305, dateStr, "ไปราชการ", rows);
+  const elapsedMs = Date.now() - startMs;
 
+  assert.ok(elapsedMs < 500, `Word generation should be fast (< 500ms), took ${elapsedMs}ms`);
+  assert.ok(
+    blob.size > 1000 && blob.size < 200 * 1024,
+    `Word file size should be compact (< 200 KB), got ${(blob.size / 1024).toFixed(1)} KB`
+  );
 
+  const buf = Buffer.from(await blob.arrayBuffer());
+  const zip = await JSZip.loadAsync(buf);
 
+  const docXml = await zip.file("word/document.xml")!.async("string");
+  const stylesXml = await zip.file("word/styles.xml")!.async("string");
+  const settingsXml = await zip.file("word/settings.xml")!.async("string");
+  const fontTableXml = await zip.file("word/fontTable.xml")!.async("string");
+
+  assert.ok(stylesXml.includes('w:ascii="TH SarabunPSK"'));
+  assert.ok(settingsXml.includes("compatibilityMode"));
+  assert.ok(fontTableXml.includes('w:name="TH SarabunPSK"'));
+  assert.ok(fontTableXml.includes('w:altName w:val="TH Sarabun New'));
+
+  // Verify no <w:noWrap/> that could distort fixed column widths
+  assert.equal(docXml.includes("<w:noWrap/>"), false);
+
+  // Verify all 3 tables (header 5 cols, main 10 cols, signature 5 cols) have matching <w:gridCol> and <w:tc> counts
+  const tables = docXml.match(/<w:tbl>[\s\S]*?<\/w:tbl>/g) || [];
+  assert.equal(tables.length, 3, "Single-page document must have 3 tables (header, 10-col data, signature)");
+
+  const expectedCols = [5, 10, 5];
+  tables.forEach((tblXml, idx) => {
+    const gridCols = tblXml.match(/<w:gridCol\b/g) || [];
+    assert.equal(
+      gridCols.length,
+      expectedCols[idx],
+      `Table ${idx} must have ${expectedCols[idx]} <w:gridCol> elements`
+    );
+    const trList = tblXml.match(/<w:tr>[\s\S]*?<\/w:tr>/g) || [];
+    for (const trXml of trList) {
+      const tcList = trXml.match(/<w:tc>/g) || [];
+      assert.equal(
+        tcList.length,
+        expectedCols[idx],
+        `Every <w:tr> in table ${idx} must have ${expectedCols[idx]} <w:tc> cells`
+      );
+    }
+  });
+
+  // Verify long subject "วิทยาศาสตร์ชีวภาพ" has auto-fitted font size (< 32 half-points)
+  assert.ok(docXml.includes("วิทยาศาสตร์ชีวภาพ"));
+  const bioCellMatch = docXml.match(/<w:rPr>[^<]*<w:rFonts[^>]*\/>(?:<w:b\/><w:bCs\/>)?<w:sz w:val="(\d+)"\/><w:szCs w:val="\d+"\/><\/w:rPr><w:t[^>]*>วิทยาศาสตร์ชีวภาพ<\/w:t>/);
+  assert.ok(bioCellMatch, "Must find run for วิทยาศาสตร์ชีวภาพ");
+  assert.ok(Number(bioCellMatch[1]) < 32, `Long subject font size must auto-fit (< 32), got ${bioCellMatch[1]}`);
+});
 

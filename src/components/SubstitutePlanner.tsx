@@ -1098,22 +1098,22 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                       : "px-[36px] py-[32px] text-[15px] leading-[1.35]"
                   }
                 >
-                  <div className="flex items-center justify-between gap-4 mb-4">
+                  <div className="flex items-center justify-center gap-[124px] mb-4">
                     <img
                       src={LEFT_SCHOOL_LOGO_URL}
                       alt="ตราโรงเรียนวรคุณอุปถัมภ์"
-                      className="h-[88px] w-auto object-contain"
+                      className="h-[92px] w-auto object-contain"
                     />
-                    <div className="text-center">
+                    <div className="text-center pt-1">
                       <h3 className="text-[20px] font-bold">แบบบันทึกการจัดสอนแทน</h3>
-                      <h4 className="text-[19px] font-bold mt-2">
+                      <h4 className="text-[19px] font-bold mt-2.5">
                         {formatThaiMonthYearHeader(selectedDate)}
                       </h4>
                     </div>
                     <img
                       src={RIGHT_OBEC_LOGO_URL}
                       alt="ตราองค์กรหมายเลข 1"
-                      className="h-[82px] w-auto object-contain"
+                      className="h-[84px] w-auto object-contain"
                     />
                   </div>
                   <table className="w-full border-collapse border border-black text-[15px]">

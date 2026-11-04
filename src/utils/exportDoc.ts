@@ -99,35 +99,77 @@ async function triggerBrowserDownload(
   setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
 
+const cachedImagesMap = new Map<string, Promise<HTMLImageElement>>();
+const cachedPngBase64Map = new Map<string, Promise<string>>();
+
 function loadImage(src: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
+  const existing = cachedImagesMap.get(src);
+  if (existing) return existing;
+
+  const promise = new Promise<HTMLImageElement>((resolve, reject) => {
+    if (typeof Image === "undefined") {
+      reject(new Error("Image API is not available in this environment"));
+      return;
+    }
     const img = new Image();
     img.crossOrigin = "anonymous";
     img.onload = () => resolve(img);
-    img.onerror = (e) => reject(e);
+    img.onerror = (e) => {
+      cachedImagesMap.delete(src);
+      reject(e);
+    };
     img.src = src;
   });
+
+  cachedImagesMap.set(src, promise);
+  return promise;
 }
 
-async function loadImageToPngBase64(src: string, fallbackDataUrl?: string): Promise<string> {
-  try {
-    const img = await loadImage(src);
-    const c = document.createElement("canvas");
-    c.width = img.naturalWidth || 300;
-    c.height = img.naturalHeight || 300;
-    const ctx = c.getContext("2d");
-    if (ctx) {
-      ctx.drawImage(img, 0, 0);
-      const dataUrl = c.toDataURL("image/png");
-      return dataUrl.split(",")[1] || "";
+async function loadImageToPngBase64(
+  src: string,
+  fallbackDataUrl?: string,
+  maxDimension = 200
+): Promise<string> {
+  const cacheKey = `${src}::${maxDimension}`;
+  const cached = cachedPngBase64Map.get(cacheKey);
+  if (cached) return cached;
+
+  const promise = (async () => {
+    if (typeof document !== "undefined") {
+      try {
+        const img = await loadImage(src).catch(() => {
+          if (fallbackDataUrl) return loadImage(fallbackDataUrl);
+          throw new Error("Failed to load image");
+        });
+        const natW = img.naturalWidth || 200;
+        const natH = img.naturalHeight || 200;
+        const ratio = Math.min(1, maxDimension / Math.max(natW, natH));
+        const targetW = Math.max(1, Math.round(natW * ratio));
+        const targetH = Math.max(1, Math.round(natH * ratio));
+
+        const c = document.createElement("canvas");
+        c.width = targetW;
+        c.height = targetH;
+        const ctx = c.getContext("2d");
+        if (ctx) {
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = "high";
+          ctx.drawImage(img, 0, 0, targetW, targetH);
+          const dataUrl = c.toDataURL("image/png");
+          return dataUrl.split(",")[1] || "";
+        }
+      } catch {
+        // Fallback below
+      }
     }
-  } catch {
-    // Fallback below
-  }
-  if (fallbackDataUrl && fallbackDataUrl.includes(",")) {
-    return fallbackDataUrl.split(",")[1];
-  }
-  return "";
+    if (fallbackDataUrl && fallbackDataUrl.includes(",")) {
+      return fallbackDataUrl.split(",")[1];
+    }
+    return "";
+  })();
+
+  cachedPngBase64Map.set(cacheKey, promise);
+  return promise;
 }
 
 function wrapCanvasText(
@@ -247,6 +289,60 @@ function drawFittedCellLine(
     ctx.font = `${fontWeight} ${fontSize}px ${fontStack}`;
   }
   ctx.fillText(text, x, y);
+}
+
+let sharedMeasureCtx: CanvasRenderingContext2D | null = null;
+
+function countThaiBaseChars(text: string): number {
+  return String(text || "").replace(/[\u0E31\u0E34-\u0E3A\u0E47-\u0E4E]/g, "").length;
+}
+
+/**
+ * คำนวณขนาดฟอนต์ (หน่วย half-points ของ Word เช่น 32 = 16pt) ให้พอดีกับความกว้างคอลัมน์ในบรรทัดเดียว
+ * ใช้ตรรกะเดียวกับ drawFittedCellLine บนพรีวิว Canvas เพื่อให้ตารางในไฟล์ Word ไม่ล้นหรือตัดบรรทัดเพี้ยน
+ */
+function measureFittedHalfPoints(
+  text: string,
+  maxWidthPx: number,
+  baseFontSizePx = 21.3,
+  fontWeight: "400" | "700" = "400"
+): number {
+  const clean = String(text || "").trim();
+  if (!clean) return Math.round((baseFontSizePx / 21.3) * 32);
+
+  // เผื่อระยะปลอดภัย 93% สำหรับการเรนเดอร์ช่องว่างตัวอักษรในโปรแกรม Microsoft Word
+  const safeMaxWidthPx = maxWidthPx * 0.93;
+
+  if (typeof document !== "undefined") {
+    try {
+      if (!sharedMeasureCtx) {
+        const c = document.createElement("canvas");
+        sharedMeasureCtx = c.getContext("2d");
+      }
+      if (sharedMeasureCtx) {
+        let fontSize = baseFontSizePx;
+        sharedMeasureCtx.font = `${fontWeight} ${fontSize}px ${TH_SARABUN_FONT_STACK}`;
+        while (fontSize > 11.5 && sharedMeasureCtx.measureText(clean).width > safeMaxWidthPx) {
+          fontSize -= 0.5;
+          sharedMeasureCtx.font = `${fontWeight} ${fontSize}px ${TH_SARABUN_FONT_STACK}`;
+        }
+        return Math.max(18, Math.round((fontSize / 21.3) * 32));
+      }
+    } catch {
+      // Fallback below
+    }
+  }
+
+  const baseCount = countThaiBaseChars(clean);
+  const avgGlyphPxAt16pt = fontWeight === "700" ? 8.8 : 8.2;
+  let fontSize = baseFontSizePx;
+  while (
+    fontSize > 11.5 &&
+    baseCount * avgGlyphPxAt16pt * (fontSize / 21.3) > safeMaxWidthPx
+  ) {
+    fontSize -= 0.5;
+  }
+  return Math.max(18, Math.round((fontSize / 21.3) * 32));
 }
 
 function resolveRowAbsentTeacherName(row: SubstituteRow, absentTeacher: TeacherRecord): string {
@@ -389,17 +485,18 @@ export async function renderPaperPageCanvas(
   ctx.textBaseline = "alphabetic";
 
   // 1. วาดโลโก้ซ้าย (ตราโรงเรียนวรคุณอุปถัมภ์) และโลโก้ขวา (ตราหมายเลข 1)
+  // ระยะห่างอ้างอิงตามต้นฉบับ: โลโก้ซ้ายห่างจากกึ่งกลางหัวกระดาษไปทางซ้าย 249px และโลโก้ขวาห่างไปทางขวา 266px (ช่องไฟขนาบข้อความสมมาตร ~124px)
   try {
     const leftLogoImg = await loadImage(LEFT_SCHOOL_LOGO_URL).catch(() =>
       loadImage(SCHOOL_LOGO)
     );
-    const leftLogoH = 88;
+    const leftLogoH = 92;
     const leftLogoW = (leftLogoImg.naturalWidth / leftLogoImg.naturalHeight) * leftLogoH;
-    const leftCenterX = marginX + 258;
+    const leftCenterX = pageWidth / 2 - 249;
     ctx.drawImage(
       leftLogoImg,
       leftCenterX - leftLogoW / 2,
-      headerTopY,
+      headerTopY - 2,
       leftLogoW,
       leftLogoH
     );
@@ -409,13 +506,13 @@ export async function renderPaperPageCanvas(
 
   try {
     const rightLogoImg = await loadImage(RIGHT_OBEC_LOGO_URL);
-    const rightLogoH = 82;
+    const rightLogoH = 84;
     const rightLogoW = (rightLogoImg.naturalWidth / rightLogoImg.naturalHeight) * rightLogoH;
-    const rightCenterX = pageWidth - marginX - 252;
+    const rightCenterX = pageWidth / 2 + 266;
     ctx.drawImage(
       rightLogoImg,
       rightCenterX - rightLogoW / 2,
-      headerTopY + 3,
+      headerTopY + 2,
       rightLogoW,
       rightLogoH
     );
@@ -432,7 +529,7 @@ export async function renderPaperPageCanvas(
     ctx,
     "แบบบันทึกการจัดสอนแทน",
     pageWidth / 2,
-    headerTopY + 38,
+    headerTopY + 42,
     440,
     26.7,
     "700",
@@ -445,7 +542,7 @@ export async function renderPaperPageCanvas(
     ctx,
     monthYearTitle,
     pageWidth / 2,
-    headerTopY + 80,
+    headerTopY + 86,
     460,
     21.3,
     "700",
@@ -703,10 +800,10 @@ export interface SubstituteSheetData {
 
 /**
  * สร้างเนื้อหา Word XML สำหรับแบบบันทึกการจัดสอนแทน
- * - กำหนดฟอนต์ TH Sarabun PSK ขนาด 16pt มาตรฐานเอกสารราชการไทย
- * - ตาราง 10 คอลัมน์ความกว้างคงที่ 15200 dxa ตามแบบฟอร์มเป๊ะ
- * - ถ้ามีหลายคาบ (> 7 คาบ) จะแบ่งหน้าถัดไปอัตโนมัติด้วย Page Break ไม่ยัดใส่หน้าเดียว
- * - ส่วนลงนาม 2 กล่องตีกรอบสี่เหลี่ยมด้านล่างตรงตามรูปพรีวิว 100%
+ * - กำหนดฟอนต์ TH SarabunPSK / TH Sarabun New ขนาด 16pt มาตรฐานเอกสารราชการไทย
+ * - หัวกระดาษ 5 คอลัมน์จัดตำแหน่งโลโก้ซ้าย-ขวาขนาบหัวเรื่องตรงตามพรีวิวเป๊ะ
+ * - ตาราง 10 คอลัมน์ความกว้างคงที่ 15200 dxa พร้อมคำนวณขนาดฟอนต์อัตโนมัติในช่องที่ข้อความยาวเพื่อไม่ให้ล้นหรือตัดบรรทัดเพี้ยน
+ * - ส่วนลงนาม 2 กล่องตีกรอบสี่เหลี่ยมด้านล่าง (5 คอลัมน์สมบูรณ์ตามมาตรฐาน OpenXML) ตรงตามรูปพรีวิว 100%
  */
 function buildDocxSheetBodyXml(
   absentTeacher: TeacherRecord,
@@ -716,28 +813,43 @@ function buildDocxSheetBodyXml(
   docPrIdBase: number = 1,
   hasRightLogo: boolean = true
 ): string {
-  // ฟอนต์ TH Sarabun PSK ตามที่กำหนด
+  // ชื่อฟอนต์มาตรฐานราชการไทยใน Windows/Office คือ "TH SarabunPSK" (และเชื่อม altName ไปยัง "TH Sarabun New" ใน fontTable.xml)
   const FN =
-    '<w:rFonts w:ascii="TH Sarabun PSK" w:hAnsi="TH Sarabun PSK" w:cs="TH Sarabun PSK" w:eastAsia="TH Sarabun PSK"/>';
+    '<w:rFonts w:ascii="TH SarabunPSK" w:hAnsi="TH SarabunPSK" w:cs="TH SarabunPSK" w:eastAsia="TH SarabunPSK"/>';
 
-  // พารากราฟมาตรฐาน กำหนดฟอนต์ TH Sarabun PSK ขนาด 16pt (32 half-points) เป็นค่าเริ่มต้น
   const P = (
     t: string,
-    o: { a?: number; bBefore?: number; c?: boolean | number; j?: string; b?: boolean | number; z?: number } = {}
+    o: {
+      a?: number;
+      bBefore?: number;
+      c?: boolean | number;
+      j?: string;
+      b?: boolean | number;
+      z?: number;
+      line?: number;
+      lineRule?: "auto" | "exact" | "atLeast";
+      indLeft?: number;
+    } = {}
   ) =>
-    `<w:p><w:pPr><w:spacing w:before="${o.bBefore ?? 0}" w:after="${o.a ?? 0}" w:line="240" w:lineRule="auto"/><w:jc w:val="${
-      o.c ? "center" : o.j || "left"
-    }"/></w:pPr><w:r><w:rPr>${FN}${o.b ? "<w:b/><w:bCs/>" : ""}<w:sz w:val="${
-      o.z || 32
-    }"/><w:szCs w:val="${o.z || 32}"/></w:rPr><w:t xml:space="preserve">${escapeXml(
+    `<w:p><w:pPr><w:spacing w:before="${o.bBefore ?? 0}" w:after="${o.a ?? 0}" w:line="${
+      o.line ?? 240
+    }" w:lineRule="${o.lineRule ?? "auto"}"/>${
+      o.indLeft ? `<w:ind w:left="${o.indLeft}"/>` : ""
+    }<w:jc w:val="${o.c ? "center" : o.j || "left"}"/></w:pPr><w:r><w:rPr>${FN}${
+      o.b ? "<w:b/><w:bCs/>" : ""
+    }<w:sz w:val="${o.z || 32}"/><w:szCs w:val="${o.z || 32}"/></w:rPr><w:t xml:space="preserve">${escapeXml(
       t
     )}</w:t></w:r></w:p>`;
+
+  const spacerP = (heightDxa: number) =>
+    P("", { bBefore: 0, a: 0, line: heightDxa, lineRule: "exact", z: 4 });
 
   const inlineImageXml = (rId: string, docId: number, cx: number, cy: number, name: string) =>
     `<w:p><w:pPr><w:spacing w:before="0" w:after="0" w:line="240" w:lineRule="auto"/><w:jc w:val="center"/></w:pPr><w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="${docId}" name="${name}"/><a:graphic xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main"><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:nvPicPr><pic:cNvPr id="0" name="${name}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="${rId}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>`;
 
-  // ตาราง 10 คอลัมน์ (ความกว้างรวม 15200 dxa สำหรับ A4 แนวนอน)
-  const W = [650, 3000, 2800, 900, 1000, 1550, 1250, 1300, 1350, 1400];
+  // สัดส่วนคอลัมน์ตรงกับพรีวิว Canvas 100%: [40, 210, 195, 60, 68, 100, 80, 88, 92, 94] px (รวม 1027px -> 15200 dxa)
+  const colWidthsPx = [40, 210, 195, 60, 68, 100, 80, 88, 92, 94];
+  const W = [592, 3108, 2886, 888, 1006, 1480, 1184, 1302, 1362, 1392];
   const H = [
     "ที่",
     "ชื่อ-สกุล ผู้สอนแทน",
@@ -755,14 +867,27 @@ function buildDocxSheetBodyXml(
 
   const C = (t: string, i: number, isHeader?: boolean | number) => {
     const isLeftAligned = !isHeader && (i === 1 || i === 2);
-    const noWrap = i !== 1 && i !== 2 ? "<w:noWrap/>" : "";
-    return `<w:tc><w:tcPr><w:tcW w:w="${W[i]}" w:type="dxa"/>${noWrap}<w:vAlign w:val="center"/></w:tcPr>${P(
+    const maxWidthPx = isHeader
+      ? colWidthsPx[i] - 8
+      : isLeftAligned
+        ? colWidthsPx[i] - 18
+        : colWidthsPx[i] - 10;
+    const fittedZ = measureFittedHalfPoints(
+      t,
+      maxWidthPx,
+      21.3,
+      isHeader ? "700" : "400"
+    );
+
+    return `<w:tc><w:tcPr><w:tcW w:w="${W[i]}" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr>${P(
       t,
       {
         c: !isLeftAligned,
         b: isHeader,
         a: 0,
-        z: 32, // ขนาด 16pt TH Sarabun PSK ตามที่กำหนด
+        bBefore: 0,
+        z: fittedZ,
+        indLeft: isLeftAligned ? 90 : 0,
       }
     )}</w:tc>`;
   };
@@ -771,39 +896,62 @@ function buildDocxSheetBodyXml(
     .map((s) => `<w:${s} w:val="single" w:sz="6" w:space="0" w:color="000000"/>`)
     .join("");
 
+  const noneTblBorders = ["top", "left", "bottom", "right", "insideH", "insideV"]
+    .map((s) => `<w:${s} w:val="none" w:sz="0" w:space="0" w:color="auto"/>`)
+    .join("");
+
   const shortDateStr = formatShortThaiDate(dateStr);
   const noteStr = (reason || "ไปราชการ").trim() || "ไปราชการ";
 
-  // แบ่งแถวออกเป็นหน้าๆ โดยอิงจากขอบกระดาษ A4 แนวนอน
   const chunks = chunkSubstituteRows(rows);
   const monthYearTitle = formatThaiMonthYearHeader(dateStr);
 
   const pageBreakXml = '<w:p><w:r><w:br w:type="page"/></w:r></w:p>';
 
-  // กล่องลงนาม 2 กล่องตีกรอบสี่เหลี่ยมด้านล่าง
+  // กล่องลงนาม 2 กล่องตีกรอบสี่เหลี่ยมด้านล่าง (5 คอลัมน์: [858, 4706, 2220, 5950, 1466] = 15200 dxa ตรงตามพิกัดพรีวิว)
   const boxBorders = `<w:tcBorders><w:top w:val="single" w:sz="12" w:space="0" w:color="000000"/><w:left w:val="single" w:sz="12" w:space="0" w:color="000000"/><w:bottom w:val="single" w:sz="12" w:space="0" w:color="000000"/><w:right w:val="single" w:sz="12" w:space="0" w:color="000000"/></w:tcBorders>`;
   const noBorders = `<w:tcBorders><w:top w:val="nil"/><w:left w:val="nil"/><w:bottom w:val="nil"/><w:right w:val="nil"/></w:tcBorders>`;
-  const sigGridXml = `<w:tblGrid><w:gridCol w:w="1000"/><w:gridCol w:w="5800"/><w:gridCol w:w="1600"/><w:gridCol w:w="5800"/></w:tblGrid>`;
+  const sigWidths = [858, 4706, 2220, 5950, 1466];
+  const sigGridXml = `<w:tblGrid>${sigWidths.map((w) => `<w:gridCol w:w="${w}"/>`).join("")}</w:tblGrid>`;
 
-  const sigTable = `<w:tbl><w:tblPr><w:tblW w:w="15200" w:type="dxa"/><w:tblLayout w:type="fixed"/><w:tblCellMar><w:top w:w="140" w:type="dxa"/><w:bottom w:w="140" w:type="dxa"/><w:left w:w="140" w:type="dxa"/><w:right w:w="140" w:type="dxa"/></w:tblCellMar></w:tblPr>${sigGridXml}<w:tr><w:trPr><w:cantSplit/></w:trPr><w:tc><w:tcPr><w:tcW w:w="1000" w:type="dxa"/>${noBorders}</w:tcPr>${P(
-    ""
-  )}</w:tc><w:tc><w:tcPr><w:tcW w:w="5800" w:type="dxa"/>${boxBorders}<w:vAlign w:val="center"/></w:tcPr>${P(
-    "ลงชื่อ.................................ผู้จัดสอนแทน",
-    { c: 1, a: 80, z: 32 }
-  )}${P("(นายธีระพงษ์ หาวัน)", { c: 1, a: 80, z: 32 })}${P(
-    "งานการจัดการเรียนการสอน",
-    { c: 1, a: 0, z: 32 }
-  )}</w:tc><w:tc><w:tcPr><w:tcW w:w="1600" w:type="dxa"/>${noBorders}</w:tcPr>${P(
-    ""
-  )}</w:tc><w:tc><w:tcPr><w:tcW w:w="5800" w:type="dxa"/>${boxBorders}<w:vAlign w:val="center"/></w:tcPr>${P(
-    "ลงชื่อ.................................หัวหน้ากลุ่มบริหารวิชาการ",
-    { c: 1, a: 80, z: 32 }
-  )}${P("(นายสุทธิศักดิ์ เกตษา)", { c: 1, a: 80, z: 32 })}${P(
+  const leftSigLine1 = "ลงชื่อ.................................ผู้จัดสอนแทน";
+  const rightSigLine1 = "ลงชื่อ.................................หัวหน้ากลุ่มบริหารวิชาการ";
+  const leftSigZ1 = measureFittedHalfPoints(leftSigLine1, 318 - 20, 21.3, "400");
+  const rightSigZ1 = measureFittedHalfPoints(rightSigLine1, 402 - 20, 21.3, "400");
+  const rightSigZ3 = measureFittedHalfPoints(
     "ผู้ช่วยผู้อำนวยการโรงเรียนวรคุณอุปถัมภ์",
-    { c: 1, a: 0, z: 32 }
-  )}</w:tc><w:tc><w:tcPr><w:tcW w:w="1000" w:type="dxa"/>${noBorders}</w:tcPr>${P(
-    ""
-  )}</w:tc></w:tr></w:tbl>`;
+    402 - 20,
+    21.3,
+    "400"
+  );
+
+  const sigTable = `<w:tbl><w:tblPr><w:tblW w:w="15200" w:type="dxa"/><w:jc w:val="center"/><w:tblBorders>${noneTblBorders}</w:tblBorders><w:tblLayout w:type="fixed"/><w:tblCellMar><w:top w:w="80" w:type="dxa"/><w:bottom w:w="80" w:type="dxa"/><w:left w:w="80" w:type="dxa"/><w:right w:w="80" w:type="dxa"/></w:tblCellMar></w:tblPr>${sigGridXml}<w:tr><w:trPr><w:cantSplit/><w:trHeight w:val="1500" w:hRule="atLeast"/></w:trPr><w:tc><w:tcPr><w:tcW w:w="${
+    sigWidths[0]
+  }" w:type="dxa"/>${noBorders}</w:tcPr>${P("", { z: 4 })}</w:tc><w:tc><w:tcPr><w:tcW w:w="${
+    sigWidths[1]
+  }" w:type="dxa"/>${boxBorders}<w:vAlign w:val="center"/></w:tcPr>${P(leftSigLine1, {
+    c: 1,
+    bBefore: 20,
+    a: 60,
+    z: leftSigZ1,
+  })}${P("(นายธีระพงษ์ หาวัน)", { c: 1, bBefore: 0, a: 60, z: 32 })}${P(
+    "งานการจัดการเรียนการสอน",
+    { c: 1, bBefore: 0, a: 20, z: 32 }
+  )}</w:tc><w:tc><w:tcPr><w:tcW w:w="${
+    sigWidths[2]
+  }" w:type="dxa"/>${noBorders}</w:tcPr>${P("", { z: 4 })}</w:tc><w:tc><w:tcPr><w:tcW w:w="${
+    sigWidths[3]
+  }" w:type="dxa"/>${boxBorders}<w:vAlign w:val="center"/></w:tcPr>${P(rightSigLine1, {
+    c: 1,
+    bBefore: 20,
+    a: 60,
+    z: rightSigZ1,
+  })}${P("(นายสุทธิศักดิ์ เกตษา)", { c: 1, bBefore: 0, a: 60, z: 32 })}${P(
+    "ผู้ช่วยผู้อำนวยการโรงเรียนวรคุณอุปถัมภ์",
+    { c: 1, bBefore: 0, a: 20, z: rightSigZ3 }
+  )}</w:tc><w:tc><w:tcPr><w:tcW w:w="${
+    sigWidths[4]
+  }" w:type="dxa"/>${noBorders}</w:tcPr>${P("", { z: 4 })}</w:tc></w:tr></w:tbl>`;
 
   let cumulativeRowOffset = 0;
   const pageXmlParts: string[] = [];
@@ -812,26 +960,51 @@ function buildDocxSheetBodyXml(
     const isLast = pageIdx === chunks.length - 1;
     const curDocId = docPrIdBase + pageIdx * 10;
 
-    // หัวกระดาษ 3 คอลัมน์ไร้เส้นขอบ: [โลโก้ซ้าย | แบบบันทึกการจัดสอนแทน + ประจำเดือน ... | โลโก้ขวา]
-    const leftLogoDrawing = inlineImageXml("rId1", curDocId + 1, 680000, 720000, `logo_left_${pageIdx}.png`);
+    // หัวกระดาษ 5 คอลัมน์ไร้เส้นขอบ: จัดระยะห่างโลโก้ซ้าย (-249px / -3685 dxa จากกึ่งกลาง) และโลโก้ขวา (+266px / +3937 dxa จากกึ่งกลาง) ตามภาพต้นฉบับเป๊ะ
+    const leftLogoDrawing = inlineImageXml(
+      "rId1",
+      curDocId + 1,
+      838000,
+      876000,
+      `logo_left_${pageIdx}.png`
+    );
     const rightLogoDrawing = hasRightLogo
-      ? inlineImageXml("rId2", curDocId + 2, 680000, 680000, `logo_right_${pageIdx}.png`)
-      : P("", { c: 1 });
+      ? inlineImageXml("rId2", curDocId + 2, 805000, 800000, `logo_right_${pageIdx}.png`)
+      : P("", { c: 1, z: 4 });
 
-    const headerGridXml = `<w:tblGrid><w:gridCol w:w="3800"/><w:gridCol w:w="7600"/><w:gridCol w:w="3800"/></w:tblGrid>`;
+    // 5 คอลัมน์รวม 15200 dxa: คอลัมน์กลาง (5800 dxa) อยู่กึ่งกลางหน้าพอดี (7600 dxa), โลโก้ซ้ายกึ่งกลางที่ 3915 dxa, โลโก้ขวากึ่งกลางที่ 11537 dxa
+    const headerWidths = [3130, 1570, 5800, 2074, 2626];
+    const headerGridXml = `<w:tblGrid>${headerWidths
+      .map((w) => `<w:gridCol w:w="${w}"/>`)
+      .join("")}</w:tblGrid>`;
 
-    const headerTable = `<w:tbl><w:tblPr><w:tblW w:w="15200" w:type="dxa"/><w:tblLayout w:type="fixed"/></w:tblPr>${headerGridXml}<w:tr><w:tc><w:tcPr><w:tcW w:w="3800" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr>${leftLogoDrawing}</w:tc><w:tc><w:tcPr><w:tcW w:w="7600" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr>${P(
-      "แบบบันทึกการจัดสอนแทน",
-      { c: 1, b: 1, z: 40, a: 80 } // ขนาด 20pt ตัวหนา
-    )}${P(monthYearTitle, { c: 1, b: 1, z: 32, a: 40 })}</w:tc><w:tc><w:tcPr><w:tcW w:w="3800" w:type="dxa"/><w:vAlign w:val="center"/></w:tcPr>${rightLogoDrawing}</w:tc></w:tr></w:tbl>`;
-
-    const pageIndicator =
+    const rightHeaderSpacerContent =
       chunks.length > 1
-        ? P(`(หน้าที่ ${pageIdx + 1}/${chunks.length})`, { j: "right", z: 24, a: 60 })
-        : "";
+        ? P(`(หน้าที่ ${pageIdx + 1}/${chunks.length})`, { j: "right", z: 24, a: 0 })
+        : P("", { z: 4 });
+
+    const headerTable = `<w:tbl><w:tblPr><w:tblW w:w="15200" w:type="dxa"/><w:jc w:val="center"/><w:tblBorders>${noneTblBorders}</w:tblBorders><w:tblLayout w:type="fixed"/><w:tblCellMar><w:top w:w="0" w:type="dxa"/><w:bottom w:w="0" w:type="dxa"/><w:left w:w="0" w:type="dxa"/><w:right w:w="0" w:type="dxa"/></w:tblCellMar></w:tblPr>${headerGridXml}<w:tr><w:trPr><w:cantSplit/><w:trHeight w:val="1360" w:hRule="atLeast"/></w:trPr><w:tc><w:tcPr><w:tcW w:w="${
+      headerWidths[0]
+    }" w:type="dxa"/>${noBorders}<w:vAlign w:val="top"/></w:tcPr>${P("", {
+      z: 4,
+    })}</w:tc><w:tc><w:tcPr><w:tcW w:w="${
+      headerWidths[1]
+    }" w:type="dxa"/>${noBorders}<w:vAlign w:val="center"/></w:tcPr>${leftLogoDrawing}</w:tc><w:tc><w:tcPr><w:tcW w:w="${
+      headerWidths[2]
+    }" w:type="dxa"/>${noBorders}<w:vAlign w:val="center"/></w:tcPr>${P(
+      "แบบบันทึกการจัดสอนแทน",
+      { c: 1, b: 1, z: 40, bBefore: 100, a: 160 }
+    )}${P(monthYearTitle, { c: 1, b: 1, z: 32, bBefore: 0, a: 0 })}</w:tc><w:tc><w:tcPr><w:tcW w:w="${
+      headerWidths[3]
+    }" w:type="dxa"/>${noBorders}<w:vAlign w:val="center"/></w:tcPr>${rightLogoDrawing}</w:tc><w:tc><w:tcPr><w:tcW w:w="${
+      headerWidths[4]
+    }" w:type="dxa"/>${noBorders}<w:vAlign w:val="top"/></w:tcPr>${rightHeaderSpacerContent}</w:tc></w:tr></w:tbl>`;
+
+    const headerRowHeightDxa = pageChunk.length > 10 ? 500 : pageChunk.length > 6 ? 540 : 580;
+    const dataRowHeightDxa = pageChunk.length > 10 ? 480 : pageChunk.length > 6 ? 530 : 580;
 
     // แถวตาราง 10 คอลัมน์
-    const tableHeaderRowXml = `<w:tr><w:trPr><w:tblHeader/><w:cantSplit/></w:trPr>${H.map(
+    const tableHeaderRowXml = `<w:tr><w:trPr><w:tblHeader/><w:cantSplit/><w:trHeight w:val="${headerRowHeightDxa}" w:hRule="atLeast"/></w:trPr>${H.map(
       (h, i) => C(h, i, 1)
     ).join("")}</w:tr>`;
 
@@ -856,19 +1029,21 @@ function buildDocxSheetBodyXml(
           "",
           noteStr,
         ];
-        return `<w:tr><w:trPr><w:cantSplit/></w:trPr>${vals.map((v, i) => C(String(v), i)).join("")}</w:tr>`;
+        return `<w:tr><w:trPr><w:cantSplit/><w:trHeight w:val="${dataRowHeightDxa}" w:hRule="atLeast"/></w:trPr>${vals
+          .map((v, i) => C(String(v), i))
+          .join("")}</w:tr>`;
       })
       .join("");
 
-    const tb = `<w:tbl><w:tblPr><w:tblW w:w="15200" w:type="dxa"/><w:tblBorders>${bd}</w:tblBorders><w:tblLayout w:type="fixed"/><w:tblCellMar><w:top w:w="80" w:type="dxa"/><w:bottom w:w="80" w:type="dxa"/><w:left w:w="120" w:type="dxa"/><w:right w:w="120" w:type="dxa"/></w:tblCellMar></w:tblPr>${gridXml}${tableHeaderRowXml}${dataRowsXml}</w:tbl>`;
+    const tb = `<w:tbl><w:tblPr><w:tblW w:w="15200" w:type="dxa"/><w:jc w:val="center"/><w:tblBorders>${bd}</w:tblBorders><w:tblLayout w:type="fixed"/><w:tblCellMar><w:top w:w="40" w:type="dxa"/><w:bottom w:w="40" w:type="dxa"/><w:left w:w="50" w:type="dxa"/><w:right w:w="50" w:type="dxa"/></w:tblCellMar></w:tblPr>${gridXml}${tableHeaderRowXml}${dataRowsXml}</w:tbl>`;
 
-    let pageXml = headerTable + pageIndicator + P("", { a: 80 }) + tb;
+    let pageXml = headerTable + spacerP(140) + tb;
 
     // หน้าสุดท้าย: ใส่กล่องลงนาม
     if (isLast) {
       const spacingBeforeSig =
-        pageChunk.length > 10 ? 180 : pageChunk.length > 6 ? 300 : 420;
-      pageXml += P("", { a: spacingBeforeSig }) + sigTable;
+        pageChunk.length > 10 ? 320 : pageChunk.length > 6 ? 520 : 680;
+      pageXml += spacerP(spacingBeforeSig) + sigTable;
     }
 
     pageXmlParts.push(pageXml);
@@ -879,8 +1054,12 @@ function buildDocxSheetBodyXml(
 }
 
 async function generateMultiDocxBlob(sheets: SubstituteSheetData[]): Promise<Blob> {
-  const leftLogoBase64 = await loadImageToPngBase64(LEFT_SCHOOL_LOGO_URL, SCHOOL_LOGO);
-  const rightLogoBase64 = await loadImageToPngBase64(RIGHT_OBEC_LOGO_URL);
+  await ensureSarabunFontLoaded();
+
+  const [leftLogoBase64, rightLogoBase64] = await Promise.all([
+    loadImageToPngBase64(LEFT_SCHOOL_LOGO_URL, SCHOOL_LOGO, 200),
+    loadImageToPngBase64(RIGHT_OBEC_LOGO_URL, undefined, 200),
+  ]);
   const hasRightLogo = Boolean(rightLogoBase64);
 
   const pageBreakXml = '<w:p><w:r><w:br w:type="page"/></w:r></w:p>';
@@ -905,7 +1084,7 @@ async function generateMultiDocxBlob(sheets: SubstituteSheetData[]): Promise<Blo
   z.file(
     "[Content_Types].xml",
     X +
-      '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/fontTable.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.fontTable+xml"/></Types>'
+      '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Default Extension="png" ContentType="image/png"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/><Override PartName="/word/settings.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml"/><Override PartName="/word/fontTable.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.fontTable+xml"/></Types>'
   );
   z.file(
     "_rels/.rels",
@@ -915,6 +1094,8 @@ async function generateMultiDocxBlob(sheets: SubstituteSheetData[]): Promise<Blo
 
   const relsItems = [
     '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/logo_left.png"/>',
+    '<Relationship Id="rIdStyles" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>',
+    '<Relationship Id="rIdSettings" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/settings" Target="settings.xml"/>',
     '<Relationship Id="rIdFont" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/fontTable" Target="fontTable.xml"/>',
   ];
   if (hasRightLogo) {
@@ -931,9 +1112,19 @@ async function generateMultiDocxBlob(sheets: SubstituteSheetData[]): Promise<Blo
       )}</Relationships>`
   );
   z.file(
+    "word/styles.xml",
+    X +
+      '<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="TH SarabunPSK" w:hAnsi="TH SarabunPSK" w:cs="TH SarabunPSK" w:eastAsia="TH SarabunPSK"/><w:sz w:val="32"/><w:szCs w:val="32"/><w:lang w:val="en-US" w:eastAsia="th-TH" w:bidi="th-TH"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:before="0" w:after="0" w:line="240" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style></w:styles>'
+  );
+  z.file(
+    "word/settings.xml",
+    X +
+      '<w:settings xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:zoom w:percent="100"/><w:compat><w:compatSetting w:name="compatibilityMode" w:uri="http://schemas.microsoft.com/office/word" w:val="15"/></w:compat></w:settings>'
+  );
+  z.file(
     "word/fontTable.xml",
     X +
-      '<w:fonts xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:font w:name="TH Sarabun PSK"><w:altName w:val="TH Sarabun New"/><w:family w:val="swiss"/><w:charset w:val="DE"/></w:font><w:font w:name="TH Sarabun New"><w:family w:val="swiss"/><w:charset w:val="DE"/></w:font><w:font w:name="Sarabun"><w:family w:val="swiss"/></w:font></w:fonts>'
+      '<w:fonts xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:font w:name="TH SarabunPSK"><w:altName w:val="TH Sarabun New,TH Sarabun PSK,Sarabun"/><w:charset w:val="DE"/><w:family w:val="swiss"/><w:pitch w:val="variable"/></w:font><w:font w:name="TH Sarabun New"><w:altName w:val="TH SarabunPSK,Sarabun"/><w:charset w:val="DE"/><w:family w:val="swiss"/><w:pitch w:val="variable"/></w:font><w:font w:name="TH Sarabun PSK"><w:altName w:val="TH SarabunPSK,TH Sarabun New"/><w:charset w:val="DE"/><w:family w:val="swiss"/><w:pitch w:val="variable"/></w:font><w:font w:name="Sarabun"><w:charset w:val="DE"/><w:family w:val="swiss"/><w:pitch w:val="variable"/></w:font></w:fonts>'
   );
   z.file("word/media/logo_left.png", leftLogoBase64, { base64: true });
   if (hasRightLogo) {
@@ -943,11 +1134,13 @@ async function generateMultiDocxBlob(sheets: SubstituteSheetData[]): Promise<Blo
   z.file(
     "word/document.xml",
     X +
-      `<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" ${R} xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"><w:body>${body}<w:sectPr><w:pgSz w:w="16838" w:h="11906" w:orient="landscape"/><w:pgMar w:top="720" w:right="720" w:bottom="720" w:left="720" w:header="360" w:footer="360" w:gutter="0"/></w:sectPr></w:body></w:document>`
+      `<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" ${R} xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"><w:body>${body}<w:sectPr><w:pgSz w:w="16838" w:h="11906" w:orient="landscape"/><w:pgMar w:top="500" w:right="720" w:bottom="500" w:left="720" w:header="360" w:footer="360" w:gutter="0"/></w:sectPr></w:body></w:document>`
   );
 
   return z.generateAsync({
     type: "blob",
+    compression: "DEFLATE",
+    compressionOptions: { level: 6 },
     mimeType:
       "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
   });
