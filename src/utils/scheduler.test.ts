@@ -476,6 +476,87 @@ test("Teacher 305 (ครูศักดิ์ชัย แสงมาศ) hold
   }
 });
 
+test("System-wide integrity: all course codes resolve to valid Thai subject names and auto-assignment across all 5 weekdays has zero conflicts", () => {
+  const weekdays = [
+    "2026-11-02", // Mon
+    "2026-11-03", // Tue
+    "2026-11-04", // Wed
+    "2026-11-05", // Thu
+    "2026-11-06", // Fri
+  ];
+
+  // 1. Verify every teachable course code across all teachers resolves to a valid Thai subject name
+  for (const t of TEACHERS) {
+    for (let d = 0; d < 5; d++) {
+      for (let p = 0; p < 7; p++) {
+        const parsed = parseScheduleCell(t.d?.[d]?.[p], t.r);
+        if (parsed.isTeachable) {
+          const subjectName = getSubjectNameFromCourse(parsed.code, t.pdfGroup, t.id);
+          assert.ok(
+            subjectName && subjectName !== "-",
+            `Course code ${parsed.code} of teacher ${t.id} should resolve to a valid subject name`
+          );
+        }
+      }
+    }
+  }
+
+  // 2. Verify autoAssignCombinedSubstitutes for every single non-exempt teacher across all 5 weekdays
+  for (const t of TEACHERS) {
+    if (isTeacherExemptFromNeedingSubstitute(t)) continue;
+    for (const dateStr of weekdays) {
+      const dayIdx = getDayIndex(dateStr);
+      const asg = autoAssignCombinedSubstitutes([t.id], dateStr);
+      const rows = buildCombinedDocumentRows([t.id], dateStr, asg, "");
+      for (const row of rows) {
+        assert.notEqual(row.n, "-", `Teacher ${t.id} on ${dateStr} P${row.p} must have a valid substitute`);
+        const slotKey = row.slotKey!;
+        const assignedVal = asg[slotKey];
+        assert.ok(assignedVal, `Slot ${slotKey} must have an assignment value`);
+        if (assignedVal.startsWith("t")) {
+          const subId = Number(assignedVal.slice(1));
+          assert.notEqual(subId, t.id, "Absent teacher cannot substitute for themselves");
+          assert.notEqual(subId, 302, "Exempt teacher 302 cannot substitute");
+          assert.notEqual(subId, 100, "Admin 100 cannot substitute");
+          assert.notEqual(subId, 101, "Admin 101 cannot substitute");
+          assert.notEqual(subId, 202, "Admin 202 cannot substitute");
+
+          const subTeacher = TEACHERS.find((x) => x.id === subId);
+          assert.ok(subTeacher, `Substitute teacher ${subId} must exist`);
+          const rawCell = subTeacher.d?.[dayIdx]?.[row.p - 1] || "";
+          assert.equal(
+            rawCell.trim(),
+            "",
+            `Substitute teacher ${subId} assigned on ${dateStr} P${row.p} must be free in their own schedule`
+          );
+        }
+      }
+    }
+  }
+
+  // 3. Verify multi-teacher combined assignment (e.g., 305 + 301 + 102 on Monday) has zero double-booking
+  const multiIds = [305, 301, 102];
+  for (const dateStr of weekdays) {
+    const asg = autoAssignCombinedSubstitutes(multiIds, dateStr);
+    const slots = getCombinedTeacherClasses(multiIds, dateStr);
+    const usedByPeriod: Record<number, Set<string>> = {};
+    for (const slot of slots) {
+      const val = asg[slot.slotKey];
+      assert.ok(val);
+      if (val.startsWith("t")) {
+        if (!usedByPeriod[slot.p]) usedByPeriod[slot.p] = new Set();
+        assert.equal(
+          usedByPeriod[slot.p].has(val),
+          false,
+          `Substitute ${val} must not be double-booked in period ${slot.p + 1} on ${dateStr}`
+        );
+        usedByPeriod[slot.p].add(val);
+      }
+    }
+  }
+});
+
+
 
 
 

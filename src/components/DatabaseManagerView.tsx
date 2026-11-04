@@ -619,6 +619,16 @@ export const DatabaseManagerView: React.FC<DatabaseManagerViewProps> = ({
                         {t.pdfGroup}
                       </span>
                     )}
+                    {t.id === 302 && (
+                      <span className="px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200 text-xs font-bold">
+                        ย้ายไป รร.อื่น · โอนคาบให้ 305 ครูศักดิ์ชัย ทั้งหมด
+                      </span>
+                    )}
+                    {t.id === 305 && (
+                      <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-200 text-xs font-bold">
+                        รับโอนคาบชีววิทยาจาก 302 ครูรณสิทธิ์ ทั้งหมด
+                      </span>
+                    )}
                   </div>
                   <div className="text-xs text-[#51608a] dark:text-[#9fb0dc] mt-0.5">
                     กลุ่มสาระหลัก: <b>{t.g}</b> · ประจำ{formatRoomLabel(t.r)} · รวม{" "}
