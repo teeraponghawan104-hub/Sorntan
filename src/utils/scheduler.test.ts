@@ -28,6 +28,13 @@ import {
   isSchoolAdministrator,
   isTeacherExemptFromNeedingSubstitute,
   isExcludedFromSubstituting,
+  extractGradeLevel,
+  normalizeClassRoom,
+  getTeacherTaughtGrades,
+  getTeacherTaughtClassRooms,
+  doesTeacherTeachGrade,
+  doesTeacherTeachExactClass,
+  formatTeacherGradesSummary,
 } from "./scheduler";
 
 test("all 31 teachers (27 regular + 4 student teachers) from the 16-page PDF are loaded with 5x7 schedules", () => {
@@ -105,20 +112,29 @@ test("getTeacherClasses excludes meetings and homeroom but includes Period 7 aca
   assert.equal(thu203[1].cls, "4/1");
 });
 
-test("autoAssignSubstitutes prioritizes same department regular teachers first, then free student teachers (205, 307, 308, 604)", () => {
-  // Teacher 102 (ภาษาไทย) on Monday (2026-11-02): P1 (ท33102 6/1), P2 (ท32102 5/1), P4 (ท32102 5/2)
-  // Teacher 103 (ภาษาไทย) is free on Monday in P1 and P4, but busy in P2 (ท31102 4/1)
-  // In P2 on Monday: student teachers 205, 307, 604 have classes, while 308 (นายธีระเทพ มัครมย์) is free!
-  const asg = autoAssignSubstitutes(102, "2026-11-02");
-  assert.equal(asg[0], "t103"); // P1 -> 103 is free and in ภาษาไทย
-  assert.equal(asg[1], "t308"); // P2 -> 103 is busy, so assigns free student teacher 308
-  assert.equal(asg[3], "t103"); // P4 -> 103 is free and in ภาษาไทย
+test("autoAssignSubstitutes and getCandidateTeachers prioritize same grade level first, then subject group", () => {
+  // 1) Teacher 201 (คณิตศาสตร์) on Tuesday (2026-11-03): P3 is ค32102 5/1 (Grade 5)
+  // Both 203 and 204 are free in คณิตศาสตร์ on Tue P3, but 204 teaches ม.5 (5/1) while 203 only teaches ม.2, ม.4!
+  // Therefore 204 (Same Grade ม.5 + Same Group คณิตศาสตร์) MUST be chosen over 203!
+  const asg201Tue = autoAssignSubstitutes(201, "2026-11-03");
+  assert.equal(asg201Tue[2], "t204");
 
-  const rows = buildDocumentRows(102, "2026-11-02", asg, "");
+  const cands201TueP3 = getCandidateTeachers(201, "2026-11-03", 2);
+  assert.equal(cands201TueP3[0].id, 204);
+
+  // 2) Teacher 102 (ภาษาไทย) on Monday (2026-11-02): P1 (ท33102 6/1), P2 (ท32102 5/1), P4 (ท32102 5/2)
+  // Teacher 103 (ภาษาไทย) only teaches ม.1, ม.3, ม.4 (does NOT teach ม.5 or ม.6).
+  // So in P1 (6/1), teachers who teach ม.6 (specifically 6/1, e.g. 301 ครูเมธาวี สายสิน) are prioritized first!
+  const asg102Mon = autoAssignSubstitutes(102, "2026-11-02");
+  assert.equal(asg102Mon[0], "t301"); // P1 (6/1) -> 301 teaches 6/1 and is free
+  assert.equal(asg102Mon[1], "t303"); // P2 (5/1) -> 303 teaches 5/1 and is free
+  assert.equal(asg102Mon[3], "t304"); // P4 (5/2) -> 304 teaches 5/2 and has 0 assigned periods so far
+
+  const rows = buildDocumentRows(102, "2026-11-02", asg102Mon, "");
   assert.equal(rows.length, 3);
-  assert.equal(rows[0].n, "ครูอมรรัตน์ สายเหนือ");
-  assert.equal(rows[1].n, "นายธีระเทพ มัครมย์ (นศ.ฝึกสอน)");
-  assert.equal(rows[1].g, "วิทยาศาสตร์");
+  assert.equal(rows[0].n, "ครูเมธาวี สายสิน");
+  assert.equal(rows[1].n, "ครูสถิตย์ กาทอง");
+  assert.equal(rows[2].n, "ครูนิติพงษ์ เหลาทอง");
 });
 
 test("getCandidateTeachers excludes teachers in Tuesday Period 5 department head meeting", () => {
@@ -132,7 +148,7 @@ test("getCandidateTeachers excludes teachers in Tuesday Period 5 department head
   assert.equal(candIds.includes(802), false);
 });
 
-test("setRuntimeTeachers dynamically adds and removes teachers and updates substitute scheduling", () => {
+test("setRuntimeTeachers dynamically adds and removes teachers and prioritizes same grade + same department", () => {
   const newTeacher = {
     id: 104,
     n: "ครูสมหญิง ใจงาม",
@@ -140,7 +156,7 @@ test("setRuntimeTeachers dynamically adds and removes teachers and updates subst
     pdfGroup: "ภาษาไทย",
     r: "139",
     totalHours: 18,
-    coursesSummary: ["ท21102 1/1 [3]"],
+    coursesSummary: ["ท32102 5/1 [2]"],
     otherSummary: "PLC [5]",
     s: ",,,,,,#ชุมนุม|,,,,,,#ฐาน ศก.|,,,,,,#กิจกรรม|#โฮมรูม,,,,,,#การป้องกันทุจริต|,,,,,,#แนะแนว",
     isStudentTeacher: false,
@@ -149,13 +165,35 @@ test("setRuntimeTeachers dynamically adds and removes teachers and updates subst
   setRuntimeTeachers([...INITIAL_TEACHERS, newTeacher]);
   assert.equal(TEACHERS.length, 32);
 
-  // Now on Monday Period 2 (when 103 is busy), 104 (ภาษาไทย) is free and should be assigned for 102!
+  // Now on Monday Period 2 (ท32102 5/1), 104 teaches 5/1 (Grade 5) AND is in ภาษาไทย, so 104 is Tier 1!
   const asg = autoAssignSubstitutes(102, "2026-11-02");
   assert.equal(asg[1], "t104");
 
   // Restore back to 31 initial teachers
   setRuntimeTeachers(INITIAL_TEACHERS);
   assert.equal(TEACHERS.length, 31);
+});
+
+test("grade level and classroom helpers accurately extract and match taught grades and rooms", () => {
+  assert.equal(extractGradeLevel("2/1"), "2");
+  assert.equal(extractGradeLevel("ม.4/2"), "4");
+  assert.equal(extractGradeLevel("ม.1"), "1");
+  assert.equal(extractGradeLevel("-"), null);
+
+  assert.equal(normalizeClassRoom("2/1"), "2/1");
+  assert.equal(normalizeClassRoom("ม.6/2"), "6/2");
+  assert.equal(normalizeClassRoom("ม.1"), null);
+
+  const t102 = TEACHERS.find((t) => t.id === 102);
+  const t103 = TEACHERS.find((t) => t.id === 103);
+  assert.equal(formatTeacherGradesSummary(t102), "ม.2, ม.5, ม.6");
+  assert.equal(formatTeacherGradesSummary(t103), "ม.1, ม.3, ม.4");
+  assert.equal(doesTeacherTeachGrade(t102, "6/1"), true);
+  assert.equal(doesTeacherTeachGrade(t103, "6/1"), false);
+  assert.equal(doesTeacherTeachExactClass(t102, "6/1"), true);
+  assert.equal(doesTeacherTeachExactClass(t103, "6/1"), false);
+  assert.equal( getTeacherTaughtClassRooms(t102).has("5/2"), true);
+  assert.equal(getTeacherTaughtGrades(t103).has("3"), true);
 });
 
 test("autoAssignMultipleTeachers prevents absent teachers from covering each other and prevents double-booking in the same period", () => {

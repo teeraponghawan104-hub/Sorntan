@@ -300,11 +300,138 @@ export function isSchoolAdministrator(teacher: TeacherRecord | undefined): boole
 }
 
 /**
+ * ดึงระดับชั้น (1..6) จากข้อความชั้นเรียน เช่น "2/1" -> "2", "ม.4/2" -> "4", "ม.1" -> "1"
+ */
+export function extractGradeLevel(cls: string | undefined): string | null {
+  const trimmed = String(cls || "").trim();
+  if (!trimmed || trimmed === "-") return null;
+  const match = trimmed.match(/(?:^|ม\.)([1-6])(?:\/\d+|$|\s)/);
+  if (match) return match[1];
+  const fallback = trimmed.match(/([1-6])\/\d+/);
+  if (fallback) return fallback[1];
+  return null;
+}
+
+/**
+ * แปลงข้อความห้องเรียนให้เป็นรูปแบบมาตรฐาน เช่น "ม.2/1" -> "2/1", "4/2" -> "4/2"
+ */
+export function normalizeClassRoom(cls: string | undefined): string | null {
+  const trimmed = String(cls || "").trim();
+  if (!trimmed || trimmed === "-") return null;
+  const match = trimmed.match(/(?:ม\.)?([1-6]\/\d+)/);
+  return match ? match[1] : null;
+}
+
+/**
+ * ดึงรายการห้องเรียนทั้งหมดที่ครูสอน เช่น Set(["2/1", "2/2", "5/1"])
+ */
+export function getTeacherTaughtClassRooms(teacher: TeacherRecord | undefined): Set<string> {
+  const rooms = new Set<string>();
+  if (!teacher || isTeacherExemptFromNeedingSubstitute(teacher)) return rooms;
+
+  if (teacher.d) {
+    for (const dayRow of teacher.d) {
+      for (const cell of dayRow) {
+        const parsed = parseScheduleCell(cell, teacher.r);
+        if (parsed.isTeachable && parsed.code !== "เลือกเสรี") {
+          const clsRoom = normalizeClassRoom(parsed.cls);
+          if (clsRoom) rooms.add(clsRoom);
+        }
+      }
+    }
+  }
+
+  if (Array.isArray(teacher.coursesSummary)) {
+    for (const line of teacher.coursesSummary) {
+      if (line.includes("->") || line.includes("ย้ายไป")) continue;
+      const matches = line.matchAll(/(?:ม\.)?([1-6]\/\d+)/g);
+      for (const m of matches) {
+        if (m[1]) rooms.add(m[1]);
+      }
+    }
+  }
+
+  return rooms;
+}
+
+/**
+ * ดึงรายการระดับชั้นทั้งหมดที่ครูสอน เช่น Set(["2", "5", "6"])
+ */
+export function getTeacherTaughtGrades(teacher: TeacherRecord | undefined): Set<string> {
+  const grades = new Set<string>();
+  if (!teacher || isTeacherExemptFromNeedingSubstitute(teacher)) return grades;
+
+  const classRooms = getTeacherTaughtClassRooms(teacher);
+  classRooms.forEach((clsRoom) => {
+    const g = extractGradeLevel(clsRoom);
+    if (g) grades.add(g);
+  });
+
+  if (teacher.d) {
+    for (const dayRow of teacher.d) {
+      for (const cell of dayRow) {
+        const parsed = parseScheduleCell(cell, teacher.r);
+        if (parsed.isTeachable && parsed.code !== "เลือกเสรี") {
+          const g = extractGradeLevel(parsed.cls);
+          if (g) grades.add(g);
+        }
+      }
+    }
+  }
+
+  return grades;
+}
+
+/**
+ * แปลงระดับชั้นที่ครูสอนเป็นข้อความสั้น เช่น "ม.1, ม.4, ม.5"
+ */
+export function formatTeacherGradesSummary(teacher: TeacherRecord | undefined): string {
+  const grades = Array.from(getTeacherTaughtGrades(teacher)).sort();
+  if (grades.length === 0) return "-";
+  return grades.map((g) => `ม.${g}`).join(", ");
+}
+
+/**
+ * ตรวจสอบว่าครูท่านนี้สอนในระดับชั้นเดียวกับคาบที่ต้องการจัดสอนแทนหรือไม่
+ */
+export function doesTeacherTeachGrade(
+  teacher: TeacherRecord | undefined,
+  targetClassOrGrade: string | undefined
+): boolean {
+  if (!teacher || !targetClassOrGrade) return false;
+  const taughtGrades = getTeacherTaughtGrades(teacher);
+  const g = extractGradeLevel(targetClassOrGrade);
+  if (g) return taughtGrades.has(g);
+  if (targetClassOrGrade.includes("ม.ต้น")) {
+    return taughtGrades.has("1") || taughtGrades.has("2") || taughtGrades.has("3");
+  }
+  if (targetClassOrGrade.includes("ม.ปลาย")) {
+    return taughtGrades.has("4") || taughtGrades.has("5") || taughtGrades.has("6");
+  }
+  return false;
+}
+
+/**
+ * ตรวจสอบว่าครูท่านนี้สอนห้องเรียนเดียวกันโดยตรงหรือไม่ (เช่น "2/1")
+ */
+export function doesTeacherTeachExactClass(
+  teacher: TeacherRecord | undefined,
+  targetClass: string | undefined
+): boolean {
+  if (!teacher || !targetClass) return false;
+  const targetRoom = normalizeClassRoom(targetClass);
+  if (!targetRoom) return false;
+  return getTeacherTaughtClassRooms(teacher).has(targetRoom);
+}
+
+/**
  * ค้นหาครูและนักศึกษาฝึกสอนที่ว่างในวันและคาบที่กำหนด
- * เรียงลำดับ:
- * 1) ครูประจำการในกลุ่มสาระเดียวกัน (!isStudentTeacher && g === absent.g)
- * 2) นักศึกษาฝึกสอนที่ว่างในคาบนั้น (isStudentTeacher) โดยเรียงกลุ่มสาระเดียวกันขึ้นก่อน
- * 3) ครูประจำการต่างกลุ่มสาระ (!isStudentTeacher && g !== absent.g)
+ * เรียงลำดับโดยคำนึงถึงครูที่สอนในระดับชั้นเดียวกันเป็นหลัก แล้วค่อยเรียงตามกลุ่มสาระ:
+ * 1) ครูประจำการที่สอนระดับชั้นเดียวกัน และอยู่กลุ่มสาระเดียวกัน (!isStudentTeacher && sameGrade && sameGroup)
+ * 2) ครูประจำการที่สอนระดับชั้นเดียวกัน (ต่างกลุ่มสาระ) (!isStudentTeacher && sameGrade && !sameGroup)
+ * 3) ครูประจำการในกลุ่มสาระเดียวกัน (ที่สอนระดับชั้นอื่น) (!isStudentTeacher && !sameGrade && sameGroup)
+ * 4) นักศึกษาฝึกสอนที่ว่างในคาบนั้น (isStudentTeacher) โดยเรียงตามระดับชั้นเดียวกัน แล้วตามกลุ่มสาระเดียวกัน
+ * 5) ครูประจำการท่านอื่นที่ว่าง (ต่างระดับชั้น และต่างกลุ่มสาระ)
  *
  * โดยตัดรายชื่อครูที่ลาในวันเดียวกัน (excludedTeacherIds), ผู้บริหารสถานศึกษา
  * และครู 302 (ครูรณสิทธิ์ ประดับศรี) ออกเด็ดขาด
@@ -313,12 +440,18 @@ export function getCandidateTeachers(
   absentTeacherId: string | number,
   dateStr: string,
   periodIndex: number,
-  excludedTeacherIds: number[] = []
+  excludedTeacherIds: number[] = [],
+  targetClass?: string
 ): TeacherRecord[] {
   const absentTeacher = getTeacherById(absentTeacherId);
   const dayIdx = getDayIndex(dateStr);
   if (!absentTeacher || dayIdx < 0) return [];
   if (dayIdx === 3 && periodIndex === 0) return [];
+
+  const rawAbsentCell = absentTeacher.d?.[dayIdx]?.[periodIndex] || "";
+  const parsedAbsentCell = parseScheduleCell(rawAbsentCell, absentTeacher.r);
+  const effectiveTargetClass =
+    targetClass !== undefined ? targetClass : parsedAbsentCell.cls;
 
   const excludedSet = new Set<number>([
     absentTeacher.id,
@@ -334,13 +467,23 @@ export function getCandidateTeachers(
     return cell.trim() === "";
   }).sort((m, n) => {
     const tier = (u: TeacherRecord) => {
-      if (!u.isStudentTeacher && u.g === absentTeacher.g) return 1; // ครูกลุ่มสาระเดียวกัน
-      if (u.isStudentTeacher && u.g === absentTeacher.g) return 2;  // นศ.ฝึกสอนกลุ่มสาระเดียวกัน
-      if (u.isStudentTeacher) return 3;                             // นศ.ฝึกสอนกลุ่มสาระอื่น
-      return 4;                                                     // ครูต่างกลุ่มสาระ
+      const sameGrade = doesTeacherTeachGrade(u, effectiveTargetClass);
+      const sameGroup = u.g === absentTeacher.g;
+      if (!u.isStudentTeacher && sameGrade && sameGroup) return 1; // ครูระดับชั้นเดียวกัน + กลุ่มสาระเดียวกัน
+      if (!u.isStudentTeacher && sameGrade && !sameGroup) return 2; // ครูระดับชั้นเดียวกัน + ต่างกลุ่มสาระ
+      if (!u.isStudentTeacher && !sameGrade && sameGroup) return 3; // ครูกลุ่มสาระเดียวกัน (ระดับชั้นอื่น)
+      if (u.isStudentTeacher && sameGrade && sameGroup) return 4;  // นศ.ฝึกสอนระดับชั้นเดียวกัน + กลุ่มสาระเดียวกัน
+      if (u.isStudentTeacher && sameGrade && !sameGroup) return 5;  // นศ.ฝึกสอนระดับชั้นเดียวกัน + ต่างกลุ่มสาระ
+      if (u.isStudentTeacher && !sameGrade && sameGroup) return 6;  // นศ.ฝึกสอนกลุ่มสาระเดียวกัน
+      if (u.isStudentTeacher) return 7;                             // นศ.ฝึกสอนกลุ่มสาระอื่น
+      return 8;                                                     // ครูต่างระดับชั้น + ต่างกลุ่มสาระ
     };
     const tierDiff = tier(m) - tier(n);
     if (tierDiff !== 0) return tierDiff;
+
+    const mExactClass = doesTeacherTeachExactClass(m, effectiveTargetClass) ? 1 : 0;
+    const nExactClass = doesTeacherTeachExactClass(n, effectiveTargetClass) ? 1 : 0;
+    if (nExactClass !== mExactClass) return nExactClass - mExactClass;
 
     const mSameSub = m.pdfGroup === absentTeacher.pdfGroup ? 1 : 0;
     const nSameSub = n.pdfGroup === absentTeacher.pdfGroup ? 1 : 0;
@@ -351,7 +494,101 @@ export function getCandidateTeachers(
 }
 
 /**
+ * เลือกผู้สอนแทนที่เหมาะสมที่สุดในคาบเรียนตามลำดับความสำคัญ:
+ * 1) ครูประจำการที่สอนระดับชั้นเดียวกัน + กลุ่มสาระเดียวกัน
+ * 2) ครูประจำการที่สอนระดับชั้นเดียวกัน (ต่างกลุ่มสาระ)
+ * 3) ครูประจำการในกลุ่มสาระเดียวกัน (ระดับชั้นอื่น)
+ * 4) นักศึกษาฝึกสอนที่ว่าง (เรียงตามระดับชั้นเดียวกัน -> กลุ่มสาระเดียวกัน)
+ * 5) ครูประจำการท่านอื่นที่ว่าง (ต่างระดับชั้น + ต่างกลุ่มสาระ)
+ */
+function pickBestSubstituteForSlot(
+  allFree: TeacherRecord[],
+  targetClass: string,
+  absentGroup: string,
+  absentPdfGroup: string,
+  assignedCount: Record<number, number>
+): TeacherRecord | undefined {
+  const compareCandidates = (m: TeacherRecord, n: TeacherRecord) => {
+    const countDiff = (assignedCount[m.id] || 0) - (assignedCount[n.id] || 0);
+    if (countDiff !== 0) return countDiff;
+
+    const mExact = doesTeacherTeachExactClass(m, targetClass) ? 1 : 0;
+    const nExact = doesTeacherTeachExactClass(n, targetClass) ? 1 : 0;
+    if (nExact !== mExact) return nExact - mExact;
+
+    const mSub = m.pdfGroup === absentPdfGroup ? 1 : 0;
+    const nSub = n.pdfGroup === absentPdfGroup ? 1 : 0;
+    if (nSub !== mSub) return nSub - mSub;
+
+    return m.id - n.id;
+  };
+
+  // 1. ครูประจำการที่สอนในระดับชั้นเดียวกัน และอยู่กลุ่มสาระเดียวกัน
+  const sameGradeSameDept = allFree
+    .filter(
+      (u) =>
+        !u.isStudentTeacher &&
+        doesTeacherTeachGrade(u, targetClass) &&
+        u.g === absentGroup
+    )
+    .sort(compareCandidates);
+  if (sameGradeSameDept[0]) return sameGradeSameDept[0];
+
+  // 2. ครูประจำการที่สอนในระดับชั้นเดียวกัน (ต่างกลุ่มสาระ)
+  const sameGradeOtherDept = allFree
+    .filter(
+      (u) =>
+        !u.isStudentTeacher &&
+        doesTeacherTeachGrade(u, targetClass) &&
+        u.g !== absentGroup
+    )
+    .sort(compareCandidates);
+  if (sameGradeOtherDept[0]) return sameGradeOtherDept[0];
+
+  // 3. ครูประจำการในกลุ่มสาระเดียวกัน (ที่สอนระดับชั้นอื่น)
+  const otherGradeSameDept = allFree
+    .filter(
+      (u) =>
+        !u.isStudentTeacher &&
+        !doesTeacherTeachGrade(u, targetClass) &&
+        u.g === absentGroup
+    )
+    .sort(compareCandidates);
+  if (otherGradeSameDept[0]) return otherGradeSameDept[0];
+
+  // 4. นักศึกษาฝึกสอนที่ว่างในคาบนั้น (เรียงระดับชั้นเดียวกันก่อน แล้วตามกลุ่มสาระเดียวกัน)
+  const freeStudentTeachers = allFree
+    .filter((u) => Boolean(u.isStudentTeacher))
+    .sort((m, n) => {
+      const mSameGrade = doesTeacherTeachGrade(m, targetClass) ? 1 : 0;
+      const nSameGrade = doesTeacherTeachGrade(n, targetClass) ? 1 : 0;
+      if (nSameGrade !== mSameGrade) return nSameGrade - mSameGrade;
+
+      const mSameG = m.g === absentGroup ? 1 : 0;
+      const nSameG = n.g === absentGroup ? 1 : 0;
+      if (nSameG !== mSameG) return nSameG - mSameG;
+
+      return compareCandidates(m, n);
+    });
+  if (freeStudentTeachers[0]) return freeStudentTeachers[0];
+
+  // 5. ครูประจำการท่านอื่นที่ว่าง (ต่างระดับชั้น และต่างกลุ่มสาระ)
+  const otherGradeOtherDept = allFree
+    .filter(
+      (u) =>
+        !u.isStudentTeacher &&
+        !doesTeacherTeachGrade(u, targetClass) &&
+        u.g !== absentGroup
+    )
+    .sort(compareCandidates);
+  if (otherGradeOtherDept[0]) return otherGradeOtherDept[0];
+
+  return undefined;
+}
+
+/**
  * จัดครูสอนแทนอัตโนมัติสำหรับครู 1 ท่าน (รองรับการตัดครูท่านอื่นที่ลาในวันเดียวกันออก)
+ * โดยคำนึงถึงครูที่สอนในระดับชั้นเดียวกันเป็นหลัก แล้วค่อยเรียงตามกลุ่มสาระ
  */
 export function autoAssignSubstitutes(
   absentTeacherId: string | number,
@@ -372,25 +609,23 @@ export function autoAssignSubstitutes(
 
   classes.forEach((slot) => {
     const busySet = usedInPeriod?.[slot.p] || new Set<number>();
-    const allFree = getCandidateTeachers(absentTeacherId, dateStr, slot.p, [
-      ...otherAbsentTeacherIds,
-      ...Array.from(busySet),
-    ]);
+    const allFree = getCandidateTeachers(
+      absentTeacherId,
+      dateStr,
+      slot.p,
+      [...otherAbsentTeacherIds, ...Array.from(busySet)],
+      slot.cls
+    );
 
-    // 1. ค้นหาครูประจำการในกลุ่มสาระเดียวกันที่ว่างและยังไม่ถูกจัดสอนแทนท่านอื่นในคาบเดียวกัน
-    const sameDeptRegular = allFree
-      .filter((u) => !u.isStudentTeacher && u.g === absentTeacher.g)
-      .sort((m, n) => {
-        const countDiff = (assignedCount[m.id] || 0) - (assignedCount[n.id] || 0);
-        if (countDiff !== 0) return countDiff;
-        const mSub = m.pdfGroup === absentTeacher.pdfGroup ? 1 : 0;
-        const nSub = n.pdfGroup === absentTeacher.pdfGroup ? 1 : 0;
-        if (nSub !== mSub) return nSub - mSub;
-        return m.id - n.id;
-      });
+    const chosen = pickBestSubstituteForSlot(
+      allFree,
+      slot.cls,
+      absentTeacher.g,
+      absentTeacher.pdfGroup,
+      assignedCount
+    );
 
-    if (sameDeptRegular[0]) {
-      const chosen = sameDeptRegular[0];
+    if (chosen) {
       assignments[slot.p] = `t${chosen.id}`;
       assignedCount[chosen.id] = (assignedCount[chosen.id] || 0) + 1;
       if (usedInPeriod) {
@@ -400,51 +635,7 @@ export function autoAssignSubstitutes(
       return;
     }
 
-    // 2. หากไม่มีครูประจำการในกลุ่มสาระว่าง ให้จัดนักศึกษาฝึกสอน (205, 307, 308, 604) ที่ว่างและไม่ชนคาบกัน
-    const freeStudentTeachers = allFree
-      .filter((u) => Boolean(u.isStudentTeacher))
-      .sort((m, n) => {
-        const mSameG = m.g === absentTeacher.g ? 1 : 0;
-        const nSameG = n.g === absentTeacher.g ? 1 : 0;
-        if (nSameG !== mSameG) return nSameG - mSameG;
-
-        const countDiff = (assignedCount[m.id] || 0) - (assignedCount[n.id] || 0);
-        if (countDiff !== 0) return countDiff;
-        return m.id - n.id;
-      });
-
-    if (freeStudentTeachers[0]) {
-      const chosenSt = freeStudentTeachers[0];
-      assignments[slot.p] = `t${chosenSt.id}`;
-      assignedCount[chosenSt.id] = (assignedCount[chosenSt.id] || 0) + 1;
-      if (usedInPeriod) {
-        if (!usedInPeriod[slot.p]) usedInPeriod[slot.p] = new Set<number>();
-        usedInPeriod[slot.p].add(chosenSt.id);
-      }
-      return;
-    }
-
-    // 3. หากครูในกลุ่มสาระและนักศึกษาฝึกสอนไม่ว่าง ให้เลือกครูประจำการต่างกลุ่มสาระที่ว่างและไม่ชนคาบ (เมื่อมีครูลาหลายคน)
-    const otherDeptRegular = allFree
-      .filter((u) => !u.isStudentTeacher)
-      .sort((m, n) => {
-        const countDiff = (assignedCount[m.id] || 0) - (assignedCount[n.id] || 0);
-        if (countDiff !== 0) return countDiff;
-        return m.id - n.id;
-      });
-
-    if (otherAbsentTeacherIds.length > 0 && otherDeptRegular[0]) {
-      const chosenOther = otherDeptRegular[0];
-      assignments[slot.p] = `t${chosenOther.id}`;
-      assignedCount[chosenOther.id] = (assignedCount[chosenOther.id] || 0) + 1;
-      if (usedInPeriod) {
-        if (!usedInPeriod[slot.p]) usedInPeriod[slot.p] = new Set<number>();
-        usedInPeriod[slot.p].add(chosenOther.id);
-      }
-      return;
-    }
-
-    // 4. กรณีนักศึกษาฝึกสอนทั้ง 4 ท่านติดสอนในคาบนั้นทั้งหมด
+    // กรณีไม่มีผู้ว่างในรายชื่อระบบ
     assignments[slot.p] = "s";
   });
 
@@ -453,6 +644,7 @@ export function autoAssignSubstitutes(
 
 /**
  * จัดครูสอนแทนอัตโนมัติลงในตารางเดียวกัน (สำหรับครูลา 1 ท่าน หรือหลายท่านในใบเดียวกัน)
+ * - คำนึงถึงครูที่สอนในระดับชั้นเดียวกันเป็นหลัก แล้วค่อยเรียงตามกลุ่มสาระ
  * - ตัดชื่อครูที่ลาทุกคนออกจากผู้สอนแทน
  * - ป้องกันไม่ให้จัดผู้สอนแทนคนเดียวกันซ้ำในคาบเรียนเดียวกัน (No Double-Booking)
  * - เกลี่ยจำนวนคาบสอนแทนรวมทั้งวันให้สมดุล
@@ -478,25 +670,23 @@ export function autoAssignCombinedSubstitutes(
 
   combinedSlots.forEach((slot) => {
     const busySet = usedInPeriod[slot.p] || new Set<number>();
-    const allFree = getCandidateTeachers(slot.absentTeacherId, dateStr, slot.p, [
-      ...allAbsentIds,
-      ...Array.from(busySet),
-    ]);
+    const allFree = getCandidateTeachers(
+      slot.absentTeacherId,
+      dateStr,
+      slot.p,
+      [...allAbsentIds, ...Array.from(busySet)],
+      slot.cls
+    );
 
-    // 1. ค้นหาครูประจำการในกลุ่มสาระเดียวกับเจ้าของวิชานั้น ที่ว่างและยังไม่ถูกจัดซ้ำในคาบเดียวกัน
-    const sameDeptRegular = allFree
-      .filter((u) => !u.isStudentTeacher && u.g === slot.absentTeacherGroup)
-      .sort((m, n) => {
-        const countDiff = (assignedCount[m.id] || 0) - (assignedCount[n.id] || 0);
-        if (countDiff !== 0) return countDiff;
-        const mSub = m.pdfGroup === slot.absentTeacherPdfGroup ? 1 : 0;
-        const nSub = n.pdfGroup === slot.absentTeacherPdfGroup ? 1 : 0;
-        if (nSub !== mSub) return nSub - mSub;
-        return m.id - n.id;
-      });
+    const chosen = pickBestSubstituteForSlot(
+      allFree,
+      slot.cls,
+      slot.absentTeacherGroup,
+      slot.absentTeacherPdfGroup,
+      assignedCount
+    );
 
-    if (sameDeptRegular[0]) {
-      const chosen = sameDeptRegular[0];
+    if (chosen) {
       const val = `t${chosen.id}`;
       assignments[slot.slotKey] = val;
       if (allAbsentIds.length === 1) assignments[String(slot.p)] = val;
@@ -506,49 +696,7 @@ export function autoAssignCombinedSubstitutes(
       return;
     }
 
-    // 2. จัดนักศึกษาฝึกสอน (205, 307, 308, 604) ที่ว่างและไม่ชนคาบกัน
-    const freeStudentTeachers = allFree
-      .filter((u) => Boolean(u.isStudentTeacher))
-      .sort((m, n) => {
-        const mSameG = m.g === slot.absentTeacherGroup ? 1 : 0;
-        const nSameG = n.g === slot.absentTeacherGroup ? 1 : 0;
-        if (nSameG !== mSameG) return nSameG - mSameG;
-        const countDiff = (assignedCount[m.id] || 0) - (assignedCount[n.id] || 0);
-        if (countDiff !== 0) return countDiff;
-        return m.id - n.id;
-      });
-
-    if (freeStudentTeachers[0]) {
-      const chosenSt = freeStudentTeachers[0];
-      const val = `t${chosenSt.id}`;
-      assignments[slot.slotKey] = val;
-      if (allAbsentIds.length === 1) assignments[String(slot.p)] = val;
-      assignedCount[chosenSt.id] = (assignedCount[chosenSt.id] || 0) + 1;
-      if (!usedInPeriod[slot.p]) usedInPeriod[slot.p] = new Set<number>();
-      usedInPeriod[slot.p].add(chosenSt.id);
-      return;
-    }
-
-    // 3. หากครูในกลุ่มสาระและนักศึกษาฝึกสอนไม่ว่าง ให้เลือกครูประจำการต่างกลุ่มสาระที่ว่างและไม่ชนคาบ
-    const otherDeptRegular = allFree
-      .filter((u) => !u.isStudentTeacher)
-      .sort((m, n) => {
-        const countDiff = (assignedCount[m.id] || 0) - (assignedCount[n.id] || 0);
-        if (countDiff !== 0) return countDiff;
-        return m.id - n.id;
-      });
-
-    if (allAbsentIds.length > 1 && otherDeptRegular[0]) {
-      const chosenOther = otherDeptRegular[0];
-      const val = `t${chosenOther.id}`;
-      assignments[slot.slotKey] = val;
-      assignedCount[chosenOther.id] = (assignedCount[chosenOther.id] || 0) + 1;
-      if (!usedInPeriod[slot.p]) usedInPeriod[slot.p] = new Set<number>();
-      usedInPeriod[slot.p].add(chosenOther.id);
-      return;
-    }
-
-    // 4. กรณีไม่มีผู้ว่างในรายชื่อระบบ
+    // กรณีไม่มีผู้ว่างในรายชื่อระบบ
     assignments[slot.slotKey] = "s";
     if (allAbsentIds.length === 1) assignments[String(slot.p)] = "s";
   });

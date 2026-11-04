@@ -22,7 +22,7 @@ import { OperationType, db, handleFirestoreError } from "../firebase";
 
 const LOCAL_TEACHERS_KEY = "worakhun_teachers_db_v4";
 const LOCAL_RECORDS_KEY = "worakhun_sub_records_db_v2";
-const LOCAL_PLANNER_STATE_KEY = "worakhun_live_planner_v3";
+const LOCAL_PLANNER_STATE_KEY = "worakhun_live_planner_v4";
 const LOCAL_SUBJECT_MAPPINGS_KEY = "worakhun_subject_mappings_v2";
 
 export const SHARED_OWNER_ID = "worakhun_shared";

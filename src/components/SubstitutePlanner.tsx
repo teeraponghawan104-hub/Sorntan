@@ -19,10 +19,14 @@ import { DAYS, DEPARTMENT_GROUPS, TeacherRecord } from "../data/teachers";
 import {
   buildCombinedDocumentRows,
   buildCombinedTeacherHeader,
+  doesTeacherTeachExactClass,
+  doesTeacherTeachGrade,
+  extractGradeLevel,
   formatClassLevelLabel,
   formatCleanSubstituteName,
   formatRoomLabel,
   formatShortThaiDate,
+  formatTeacherGradesSummary,
   formatThaiDate,
   formatThaiMonthYearHeader,
   getCandidateTeachers,
@@ -567,7 +571,7 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
         <div id="plan" className="mt-4 pt-3 border-t border-[#c9d4ec] dark:border-[#2a3a6e]">
           {selectedAbsentTeachers.length === 0 ? (
             <p className="text-[#51608a] dark:text-[#9fb0dc] text-base">
-              เลือกครูที่ไม่สามารถสอนได้ ระบบจะค้นหาคาบสอนและจัดครูสอนแทนที่ว่างในกลุ่มสาระเดียวกันให้อัตโนมัติ
+              เลือกครูที่ไม่สามารถสอนได้ ระบบจะค้นหาคาบสอนและจัดครูสอนแทนโดยคำนึงถึงครูที่สอนในระดับชั้นเดียวกันเป็นหลัก แล้วค่อยเรียงตามกลุ่มสาระให้อัตโนมัติ
             </p>
           ) : !selectedDate ? (
             <p className="text-[#51608a] dark:text-[#9fb0dc] text-base">
@@ -643,18 +647,39 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                   slot.absentTeacherId,
                   selectedDate,
                   slot.p,
-                  excludedIdsForSlot
+                  excludedIdsForSlot,
+                  slot.cls
                 );
-                const sameGroupRegular = candidates.filter(
-                  (c) => !c.isStudentTeacher && c.g === slot.absentTeacherGroup
+                const gradeNum = extractGradeLevel(slot.cls);
+                const gradeLabel = gradeNum ? `ม.${gradeNum}` : slot.cls;
+
+                const sameGradeSameGroupRegular = candidates.filter(
+                  (c) =>
+                    !c.isStudentTeacher &&
+                    doesTeacherTeachGrade(c, slot.cls) &&
+                    c.g === slot.absentTeacherGroup
+                );
+                const sameGradeOtherGroupRegular = candidates.filter(
+                  (c) =>
+                    !c.isStudentTeacher &&
+                    doesTeacherTeachGrade(c, slot.cls) &&
+                    c.g !== slot.absentTeacherGroup
+                );
+                const otherGradeSameGroupRegular = candidates.filter(
+                  (c) =>
+                    !c.isStudentTeacher &&
+                    !doesTeacherTeachGrade(c, slot.cls) &&
+                    c.g === slot.absentTeacherGroup
                 );
                 const freeStudentTeachers = candidates.filter(
                   (c) => c.isStudentTeacher
                 );
-                const otherGroupRegular = candidates.filter(
-                  (c) => !c.isStudentTeacher && c.g !== slot.absentTeacherGroup
+                const otherGradeOtherGroupRegular = candidates.filter(
+                  (c) =>
+                    !c.isStudentTeacher &&
+                    !doesTeacherTeachGrade(c, slot.cls) &&
+                    c.g !== slot.absentTeacherGroup
                 );
-                const noSameGroupRegular = sameGroupRegular.length === 0;
                 const currentVal =
                   getSlotAssignment(assignments, slot.absentTeacherId, slot.p) || "s";
 
@@ -691,37 +716,71 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                       }
                       className="w-full max-w-full px-2.5 py-1.5 rounded-md border border-[#c9d4ec] dark:border-[#2a3a6e] bg-white dark:bg-[#0b1330] text-[#0f2150] dark:text-[#e9eefc] text-sm sm:text-base focus:outline-2 focus:outline-[#f2c230]"
                     >
-                      {sameGroupRegular.length > 0 && (
+                      {sameGradeSameGroupRegular.length > 0 && (
                         <optgroup
-                          label={`★ ครูกลุ่มสาระเดียวกันที่ว่าง (${sameGroupRegular.length} ท่าน)`}
+                          label={`1. ครูระดับชั้นเดียวกัน (${gradeLabel}) · กลุ่มสาระเดียวกัน (${sameGradeSameGroupRegular.length} ท่าน)`}
                         >
-                          {sameGroupRegular.map((t) => (
+                          {sameGradeSameGroupRegular.map((t) => {
+                            const exact = doesTeacherTeachExactClass(t, slot.cls);
+                            return (
+                              <option key={t.id} value={`t${t.id}`}>
+                                {t.id} {t.n} (สอน {exact ? `ม.${slot.cls}` : gradeLabel} · กลุ่มสาระ{t.pdfGroup})
+                              </option>
+                            );
+                          })}
+                        </optgroup>
+                      )}
+                      {sameGradeOtherGroupRegular.length > 0 && (
+                        <optgroup
+                          label={`2. ครูระดับชั้นเดียวกัน (${gradeLabel}) · ต่างกลุ่มสาระ (${sameGradeOtherGroupRegular.length} ท่าน)`}
+                        >
+                          {sameGradeOtherGroupRegular.map((t) => {
+                            const exact = doesTeacherTeachExactClass(t, slot.cls);
+                            return (
+                              <option key={t.id} value={`t${t.id}`}>
+                                {t.id} {t.n} (สอน {exact ? `ม.${slot.cls}` : gradeLabel} · {t.pdfGroup})
+                              </option>
+                            );
+                          })}
+                        </optgroup>
+                      )}
+                      {otherGradeSameGroupRegular.length > 0 && (
+                        <optgroup
+                          label={`3. ครูกลุ่มสาระเดียวกัน · สอนระดับชั้นอื่น (${otherGradeSameGroupRegular.length} ท่าน)`}
+                        >
+                          {otherGradeSameGroupRegular.map((t) => (
                             <option key={t.id} value={`t${t.id}`}>
-                              ★ {t.id} {t.n} (กลุ่มสาระเดียวกัน · {t.pdfGroup})
+                              {t.id} {t.n} (กลุ่มสาระ{t.pdfGroup} · สอน {formatTeacherGradesSummary(t)})
                             </option>
                           ))}
                         </optgroup>
                       )}
                       {freeStudentTeachers.length > 0 && (
                         <optgroup
-                          label={`นักศึกษาฝึกสอนที่ว่างในคาบนี้ (${freeStudentTeachers.length} ท่าน)`}
+                          label={`4. นักศึกษาฝึกสอนที่ว่างในคาบนี้ (${freeStudentTeachers.length} ท่าน)`}
                         >
-                          {freeStudentTeachers.map((t) => (
-                            <option key={t.id} value={`t${t.id}`}>
-                              {t.g === slot.absentTeacherGroup ? "★ " : ""}
-                              {t.id} {t.n} (นศ.ฝึกสอน · {t.pdfGroup} -{" "}
-                              {formatRoomLabel(t.r)})
-                            </option>
-                          ))}
+                          {freeStudentTeachers.map((t) => {
+                            const stSameGrade = doesTeacherTeachGrade(t, slot.cls);
+                            const stExact = doesTeacherTeachExactClass(t, slot.cls);
+                            return (
+                              <option key={t.id} value={`t${t.id}`}>
+                                {t.id} {t.n} (นศ.ฝึกสอน ·{" "}
+                                {stSameGrade
+                                  ? `สอน ${stExact ? `ม.${slot.cls}` : gradeLabel} · `
+                                  : `สอน ${formatTeacherGradesSummary(t)} · `}
+                                {t.pdfGroup})
+                              </option>
+                            );
+                          })}
                         </optgroup>
                       )}
-                      {otherGroupRegular.length > 0 && (
+                      {otherGradeOtherGroupRegular.length > 0 && (
                         <optgroup
-                          label={`ครูต่างกลุ่มสาระที่ว่าง (${otherGroupRegular.length} ท่าน)`}
+                          label={`5. ครูท่านอื่นที่ว่าง (ต่างระดับชั้น · ต่างกลุ่มสาระ) (${otherGradeOtherGroupRegular.length} ท่าน)`}
                         >
-                          {otherGroupRegular.map((t) => (
+                          {otherGradeOtherGroupRegular.map((t) => (
                             <option key={t.id} value={`t${t.id}`}>
-                              {t.id} {t.n} ({t.pdfGroup})
+                              {t.id} {t.n} ({t.pdfGroup} · สอน {formatTeacherGradesSummary(t)})
                             </option>
                           ))}
                         </optgroup>
