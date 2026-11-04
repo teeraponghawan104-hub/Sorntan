@@ -123,6 +123,11 @@ export default function App() {
 
     let seededOnce = false;
     let migrated305Once = false;
+    let lastTeachersSig = "";
+    let lastRecordsSig = "";
+    let lastMappingsSig = "";
+    let lastAcademicSig = "";
+
     const unsubTeachers = onSnapshot(
       teachersQuery,
       (snapshot) => {
@@ -181,8 +186,13 @@ export default function App() {
             }
           }
 
-          const updated = saveLocalTeachers(cloudTeachers);
-          setTeachers(updated);
+          cloudTeachers.sort((a, b) => a.id - b.id);
+          const nextSig = JSON.stringify(cloudTeachers);
+          if (nextSig !== lastTeachersSig) {
+            lastTeachersSig = nextSig;
+            const updated = saveLocalTeachers(cloudTeachers);
+            setTeachers(updated);
+          }
         }
       },
       (error) => {
@@ -215,12 +225,16 @@ export default function App() {
             studentTeacherName: String(d.studentTeacherName || ""),
             includeSupervision: Boolean(d.includeSupervision),
             assignments: decoded.assignments,
-            updatedAtIso: new Date().toISOString(),
+            updatedAtIso: String(d.updatedAtIso || ""),
           });
         });
 
-        saveLocalSubstituteRecords(cloudRecords);
-        setSavedRecords(cloudRecords);
+        const nextSig = JSON.stringify(cloudRecords);
+        if (nextSig !== lastRecordsSig) {
+          lastRecordsSig = nextSig;
+          saveLocalSubstituteRecords(cloudRecords);
+          setSavedRecords(cloudRecords);
+        }
       },
       (error) => {
         handleFirestoreError(error, OperationType.LIST, "substitute_records");
@@ -239,25 +253,33 @@ export default function App() {
           snapshot.forEach((docSnap) => {
             if (docSnap.id === SUBJECT_MAPPINGS_DOC_ID) {
               const d = docSnap.data();
-              try {
-                const parsed = JSON.parse(String(d.mappingsJson || "{}"));
-                if (parsed && typeof parsed === "object") {
-                  saveLocalSubjectMappings(parsed);
-                  setSubjectMappings(parsed);
+              const rawJson = String(d.mappingsJson || "{}");
+              if (rawJson !== lastMappingsSig) {
+                try {
+                  const parsed = JSON.parse(rawJson);
+                  if (parsed && typeof parsed === "object") {
+                    lastMappingsSig = rawJson;
+                    saveLocalSubjectMappings(parsed);
+                    setSubjectMappings(parsed);
+                  }
+                } catch {
+                  // Ignore parse errors
                 }
-              } catch {
-                // Ignore parse errors
               }
             } else if (docSnap.id === ACADEMIC_SETTINGS_DOC_ID) {
               const d = docSnap.data();
-              try {
-                const parsed = JSON.parse(String(d.mappingsJson || "{}"));
-                if (parsed && typeof parsed === "object") {
-                  const cleanSettings = saveLocalAcademicSettings(parsed);
-                  setAcademicSettings(cleanSettings);
+              const rawJson = String(d.mappingsJson || "{}");
+              if (rawJson !== lastAcademicSig) {
+                try {
+                  const parsed = JSON.parse(rawJson);
+                  if (parsed && typeof parsed === "object") {
+                    lastAcademicSig = rawJson;
+                    const cleanSettings = saveLocalAcademicSettings(parsed);
+                    setAcademicSettings(cleanSettings);
+                  }
+                } catch {
+                  // Ignore parse errors
                 }
-              } catch {
-                // Ignore parse errors
               }
             }
           });

@@ -253,16 +253,6 @@ export async function ensureSarabunFontLoaded(): Promise<void> {
           document.fonts.load("700 26.7px 'THSarabunNewWeb'", THAI_SAMPLE_SHORT),
         ]);
         await document.fonts.ready;
-
-        for (let attempt = 0; attempt < 15; attempt++) {
-          if (
-            document.fonts.check("400 21.3px 'THSarabunNewWeb'", "แบบบันทึกการจัดสอนแทน") &&
-            document.fonts.check("700 26.7px 'THSarabunNewWeb'", "แบบบันทึกการจัดสอนแทน")
-          ) {
-            break;
-          }
-          await new Promise((r) => setTimeout(r, 80));
-        }
       } catch {
         // Proceed if FontFace API is restricted
       }
@@ -433,11 +423,11 @@ export async function renderPaperPageCanvas(
   startRowIdx: number,
   pageIndex: number,
   totalPages: number,
-  isLastPage: boolean
+  isLastPage: boolean,
+  scale = 2
 ): Promise<HTMLCanvasElement> {
   await ensureSarabunFontLoaded();
 
-  const scale = 2; // ความละเอียดสูง 2x (2246 x 1588 px)
   const pageWidth = 1123;
   const pageHeight = 794;
   const marginX = 48;
@@ -752,7 +742,8 @@ export async function renderPaperPagesToCanvases(
   absentTeacher: TeacherRecord,
   dateStr: string,
   reason: string,
-  rows: SubstituteRow[]
+  rows: SubstituteRow[],
+  scale = 2
 ): Promise<HTMLCanvasElement[]> {
   const chunks = chunkSubstituteRows(rows);
   const canvases: HTMLCanvasElement[] = [];
@@ -769,7 +760,8 @@ export async function renderPaperPagesToCanvases(
       startRowIdx,
       pIdx,
       chunks.length,
-      isLast
+      isLast,
+      scale
     );
     canvases.push(canvas);
     startRowIdx += pageRows.length;

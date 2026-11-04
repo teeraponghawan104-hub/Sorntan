@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   FileDown,
   FileText,
@@ -111,6 +111,7 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
   onOpenDatabaseTab,
 }) => {
   const paperRef = useRef<HTMLDivElement | null>(null);
+  const lastRenderedKeyRef = useRef<string>("");
   const [statusMsg, setStatusMsg] = useState<{ text: string; type: "ok" | "err" | "info" | "" }>({
     text: "",
     type: "",
@@ -124,41 +125,75 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
   const [, setAddingTeacherPickerOpen] = useState<boolean>(false);
 
   // ไม่รวมครูที่ได้รับการยกเว้นไม่ต้องจัดสอนแทนให้ (302 ครูรณสิทธิ์ ประดับศรี)
-  const regularTeachers = teachers.filter(
-    (t) => !t.isStudentTeacher && !isTeacherExemptFromNeedingSubstitute(t)
+  const regularTeachers = useMemo(
+    () =>
+      teachers.filter(
+        (t) => !t.isStudentTeacher && !isTeacherExemptFromNeedingSubstitute(t)
+      ),
+    [teachers]
   );
-  const studentTeachers = teachers.filter(
-    (t) => Boolean(t.isStudentTeacher) && !isTeacherExemptFromNeedingSubstitute(t)
+  const studentTeachers = useMemo(
+    () =>
+      teachers.filter(
+        (t) => Boolean(t.isStudentTeacher) && !isTeacherExemptFromNeedingSubstitute(t)
+      ),
+    [teachers]
   );
 
-  const cleanAbsentIds = absentTeacherIds.filter(
-    (id) => !isTeacherExemptFromNeedingSubstitute(id)
+  const cleanAbsentIds = useMemo(
+    () => absentTeacherIds.filter((id) => !isTeacherExemptFromNeedingSubstitute(id)),
+    [absentTeacherIds]
   );
   const primaryTeacherId = cleanAbsentIds[0] || "";
   const primaryTeacher = getTeacherById(primaryTeacherId);
 
   // รายชื่อครูที่ลาทุกคนที่เลือกไว้ในตารางเดียวกัน
-  const selectedAbsentTeachers: TeacherRecord[] = cleanAbsentIds
-    .map((id) => getTeacherById(id))
-    .filter((t): t is TeacherRecord => Boolean(t));
+  const selectedAbsentTeachers: TeacherRecord[] = useMemo(
+    () =>
+      cleanAbsentIds
+        .map((id) => getTeacherById(id))
+        .filter((t): t is TeacherRecord => Boolean(t)),
+    [cleanAbsentIds, teachers]
+  );
 
-  const allAbsentNumericIds = selectedAbsentTeachers.map((t) => t.id);
+  const allAbsentNumericIds = useMemo(
+    () => selectedAbsentTeachers.map((t) => t.id),
+    [selectedAbsentTeachers]
+  );
 
-  // หัวกระดาษรวมรายชื่อครูที่ลาทุกคนในตารางเดียวกัน
-  const combinedHeaderTeacher = buildCombinedTeacherHeader(absentTeacherIds);
+  // หัวกระดาษรวมรายชื่อครูที่ลาทุกคนในตารางเดียวกัน (Memoized เพื่อไม่ให้สร้าง Object ใหม่ทุกครั้งที่ re-render)
+  const combinedHeaderTeacher = useMemo(
+    () => buildCombinedTeacherHeader(absentTeacherIds),
+    [absentTeacherIds, teachers]
+  );
 
   const dayIdx = getDayIndex(selectedDate);
-  const combinedClasses = getCombinedTeacherClasses(
-    absentTeacherIds,
-    selectedDate,
-    includeSupervision
+  const combinedClasses = useMemo(
+    () =>
+      getCombinedTeacherClasses(
+        absentTeacherIds,
+        selectedDate,
+        includeSupervision
+      ),
+    [absentTeacherIds, selectedDate, includeSupervision, teachers]
   );
-  const docRows = buildCombinedDocumentRows(
-    absentTeacherIds,
-    selectedDate,
-    assignments,
-    studentTeacherName,
-    includeSupervision
+  const docRows = useMemo(
+    () =>
+      buildCombinedDocumentRows(
+        absentTeacherIds,
+        selectedDate,
+        assignments,
+        studentTeacherName,
+        includeSupervision
+      ),
+    [
+      absentTeacherIds,
+      selectedDate,
+      assignments,
+      studentTeacherName,
+      includeSupervision,
+      teachers,
+    ]
   );
 
   const canExport = Boolean(
@@ -181,52 +216,66 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
       ? "ภาคฤดูร้อน"
       : `ภาคเรียนที่ ${academicSettings.semester}`;
 
-  // เมื่อฟอนต์ราชการ THSarabunNewWeb โหลดเสร็จทั้งบนคอมและมือถือ ให้สั่งวาด Canvas ใหม่เพื่อให้หน้าตาเหมือนกันเป๊ะ 100%
+  // โหลดฟอนต์ราชการ THSarabunNewWeb เพียงครั้งเดียวตอนเปิดหน้า ไม่ใช้ event listener ซ้ำซ้อน
   useEffect(() => {
     if (typeof document === "undefined" || !document.fonts) return;
     let mounted = true;
-    const handleFontLoaded = () => {
-      if (mounted) setFontReadyTick((t) => t + 1);
-    };
-    ensureSarabunFontLoaded().then(handleFontLoaded).catch(() => {});
-    document.fonts.ready.then(handleFontLoaded).catch(() => {});
-    document.fonts.addEventListener?.("loadingdone", handleFontLoaded);
+    ensureSarabunFontLoaded()
+      .then(() => {
+        if (mounted) setFontReadyTick(1);
+      })
+      .catch(() => {});
     return () => {
       mounted = false;
-      document.fonts.removeEventListener?.("loadingdone", handleFontLoaded);
     };
   }, []);
 
-  // วาดภาพตัวอย่าง A4 ความละเอียดสูงจาก Canvas 2D โดยตรง (ตารางเดียวรวมทุกคนที่ลา)
+  const previewRenderKey = useMemo(() => {
+    if (!combinedHeaderTeacher || dayIdx < 0 || docRows.length === 0) return "";
+    return JSON.stringify({
+      id: combinedHeaderTeacher.id,
+      n: combinedHeaderTeacher.n,
+      g: combinedHeaderTeacher.g,
+      pdfGroup: combinedHeaderTeacher.pdfGroup,
+      selectedDate,
+      reason,
+      rows: docRows,
+      fontReadyTick,
+    });
+  }, [combinedHeaderTeacher, dayIdx, selectedDate, reason, docRows, fontReadyTick]);
+
+  // วาดภาพตัวอย่าง A4 จาก Canvas 2D โดยป้องกันการวาดซ้ำ (Deduplicated + Debounced)
   useEffect(() => {
-    let cancelled = false;
-    if (!combinedHeaderTeacher || dayIdx < 0 || docRows.length === 0) {
-      setPreviewPages([]);
+    if (!previewRenderKey || !combinedHeaderTeacher || dayIdx < 0 || docRows.length === 0) {
+      lastRenderedKeyRef.current = "";
+      setPreviewPages((prev) => (prev.length === 0 ? prev : []));
       return;
     }
-    renderPaperPagesToCanvases(combinedHeaderTeacher, selectedDate, reason, docRows)
-      .then((canvases) => {
-        if (!cancelled) {
-          setPreviewPages(canvases.map((c) => c.toDataURL("image/png")));
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setPreviewPages([]);
-        }
-      });
+    if (previewRenderKey === lastRenderedKeyRef.current) {
+      return;
+    }
+
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      renderPaperPagesToCanvases(combinedHeaderTeacher, selectedDate, reason, docRows, 1.35)
+        .then((canvases) => {
+          if (!cancelled) {
+            lastRenderedKeyRef.current = previewRenderKey;
+            setPreviewPages(canvases.map((c) => c.toDataURL("image/jpeg", 0.92)));
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setPreviewPages((prev) => (prev.length === 0 ? prev : []));
+          }
+        });
+    }, 60);
+
     return () => {
       cancelled = true;
+      window.clearTimeout(timer);
     };
-  }, [
-    combinedHeaderTeacher,
-    dayIdx,
-    selectedDate,
-    reason,
-    JSON.stringify(docRows),
-    teachers,
-    fontReadyTick,
-  ]);
+  }, [previewRenderKey, combinedHeaderTeacher, dayIdx, selectedDate, reason, docRows]);
 
   // ปุ่มสลับวันจันทร์-ศุกร์ในสัปดาห์ของวันที่เลือก
   const jumpToWeekday = (targetDayIdx: number) => {

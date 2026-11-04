@@ -322,12 +322,25 @@ export function normalizeClassRoom(cls: string | undefined): string | null {
   return match ? match[1] : null;
 }
 
-/**
- * ดึงรายการห้องเรียนทั้งหมดที่ครูสอน เช่น Set(["2/1", "2/2", "5/1"])
- */
-export function getTeacherTaughtClassRooms(teacher: TeacherRecord | undefined): Set<string> {
+interface TeacherGradeCacheEntry {
+  signature: string;
+  rooms: Set<string>;
+  grades: Set<string>;
+  summary: string;
+}
+
+const teacherGradeCache = new Map<number, TeacherGradeCacheEntry>();
+
+function getTeacherGradeCacheEntry(teacher: TeacherRecord | undefined): TeacherGradeCacheEntry | null {
+  if (!teacher || isTeacherExemptFromNeedingSubstitute(teacher)) return null;
+  const sig = `${teacher.s || ""}::${(teacher.coursesSummary || []).join("|")}::${teacher.r || ""}`;
+  const cached = teacherGradeCache.get(teacher.id);
+  if (cached && cached.signature === sig) {
+    return cached;
+  }
+
   const rooms = new Set<string>();
-  if (!teacher || isTeacherExemptFromNeedingSubstitute(teacher)) return rooms;
+  const grades = new Set<string>();
 
   if (teacher.d) {
     for (const dayRow of teacher.d) {
@@ -336,6 +349,8 @@ export function getTeacherTaughtClassRooms(teacher: TeacherRecord | undefined): 
         if (parsed.isTeachable && parsed.code !== "เลือกเสรี") {
           const clsRoom = normalizeClassRoom(parsed.cls);
           if (clsRoom) rooms.add(clsRoom);
+          const g = extractGradeLevel(parsed.cls);
+          if (g) grades.add(g);
         }
       }
     }
@@ -346,49 +361,50 @@ export function getTeacherTaughtClassRooms(teacher: TeacherRecord | undefined): 
       if (line.includes("->") || line.includes("ย้ายไป")) continue;
       const matches = line.matchAll(/(?:ม\.)?([1-6]\/\d+)/g);
       for (const m of matches) {
-        if (m[1]) rooms.add(m[1]);
-      }
-    }
-  }
-
-  return rooms;
-}
-
-/**
- * ดึงรายการระดับชั้นทั้งหมดที่ครูสอน เช่น Set(["2", "5", "6"])
- */
-export function getTeacherTaughtGrades(teacher: TeacherRecord | undefined): Set<string> {
-  const grades = new Set<string>();
-  if (!teacher || isTeacherExemptFromNeedingSubstitute(teacher)) return grades;
-
-  const classRooms = getTeacherTaughtClassRooms(teacher);
-  classRooms.forEach((clsRoom) => {
-    const g = extractGradeLevel(clsRoom);
-    if (g) grades.add(g);
-  });
-
-  if (teacher.d) {
-    for (const dayRow of teacher.d) {
-      for (const cell of dayRow) {
-        const parsed = parseScheduleCell(cell, teacher.r);
-        if (parsed.isTeachable && parsed.code !== "เลือกเสรี") {
-          const g = extractGradeLevel(parsed.cls);
+        if (m[1]) {
+          rooms.add(m[1]);
+          const g = extractGradeLevel(m[1]);
           if (g) grades.add(g);
         }
       }
     }
   }
 
-  return grades;
+  const sortedGrades = Array.from(grades).sort();
+  const summary = sortedGrades.length === 0 ? "-" : sortedGrades.map((g) => `ม.${g}`).join(", ");
+
+  const entry: TeacherGradeCacheEntry = {
+    signature: sig,
+    rooms,
+    grades,
+    summary,
+  };
+  teacherGradeCache.set(teacher.id, entry);
+  return entry;
+}
+
+/**
+ * ดึงรายการห้องเรียนทั้งหมดที่ครูสอน เช่น Set(["2/1", "2/2", "5/1"])
+ */
+export function getTeacherTaughtClassRooms(teacher: TeacherRecord | undefined): Set<string> {
+  const entry = getTeacherGradeCacheEntry(teacher);
+  return entry ? entry.rooms : new Set<string>();
+}
+
+/**
+ * ดึงรายการระดับชั้นทั้งหมดที่ครูสอน เช่น Set(["2", "5", "6"])
+ */
+export function getTeacherTaughtGrades(teacher: TeacherRecord | undefined): Set<string> {
+  const entry = getTeacherGradeCacheEntry(teacher);
+  return entry ? entry.grades : new Set<string>();
 }
 
 /**
  * แปลงระดับชั้นที่ครูสอนเป็นข้อความสั้น เช่น "ม.1, ม.4, ม.5"
  */
 export function formatTeacherGradesSummary(teacher: TeacherRecord | undefined): string {
-  const grades = Array.from(getTeacherTaughtGrades(teacher)).sort();
-  if (grades.length === 0) return "-";
-  return grades.map((g) => `ม.${g}`).join(", ");
+  const entry = getTeacherGradeCacheEntry(teacher);
+  return entry ? entry.summary : "-";
 }
 
 /**
@@ -560,51 +576,51 @@ export function getCandidateTeachers(
     ...excludedTeacherIds.map(Number).filter(Boolean),
   ]);
 
-  return TEACHERS.filter((t) => {
+  const filtered = TEACHERS.filter((t) => {
     if (excludedSet.has(t.id)) return false;
     // ผู้บริหารโรงเรียน และ ครู 302 (ครูรณสิทธิ์ ประดับศรี) ไม่ให้ไปสอนแทนเด็ดขาด
     if (isExcludedFromSubstituting(t)) return false;
     const cell = t.d?.[dayIdx]?.[periodIndex] || "";
     // ต้องไม่มีคาบสอน ไม่ติดประชุม (*) ไม่ติดนิเทศสอน หรือกิจกรรมในคาบนั้น
     return cell.trim() === "";
-  }).sort((m, n) => {
-    const tier = (u: TeacherRecord) => {
-      const prevContinuous = doesTeacherTeachPrevPeriodExactClass(
-        u,
-        dateStr,
-        periodIndex,
-        effectiveTargetClass
-      );
-      const sameGrade = doesTeacherTeachGrade(u, effectiveTargetClass);
-      const sameGroup = u.g === absentTeacher.g;
-      if (!u.isStudentTeacher && prevContinuous) return 0;          // ครูประจำการที่เพิ่งสอนห้องนี้ในคาบก่อนหน้า (คาบต่อเนื่อง)
-      if (!u.isStudentTeacher && sameGrade && sameGroup) return 1;  // ครูระดับชั้นเดียวกัน + กลุ่มสาระเดียวกัน
-      if (!u.isStudentTeacher && sameGrade && !sameGroup) return 2; // ครูระดับชั้นเดียวกัน + ต่างกลุ่มสาระ
-      if (!u.isStudentTeacher && !sameGrade && sameGroup) return 3; // ครูกลุ่มสาระเดียวกัน (ระดับชั้นอื่น)
-      if (u.isStudentTeacher && prevContinuous) return 4;           // นศ.ฝึกสอนที่เพิ่งสอนห้องนี้ในคาบก่อนหน้า (คาบต่อเนื่อง)
-      if (u.isStudentTeacher && sameGrade && sameGroup) return 5;   // นศ.ฝึกสอนระดับชั้นเดียวกัน + กลุ่มสาระเดียวกัน
-      if (u.isStudentTeacher && sameGrade && !sameGroup) return 6;  // นศ.ฝึกสอนระดับชั้นเดียวกัน + ต่างกลุ่มสาระ
-      if (u.isStudentTeacher && !sameGrade && sameGroup) return 7;  // นศ.ฝึกสอนกลุ่มสาระเดียวกัน
-      if (u.isStudentTeacher) return 8;                             // นศ.ฝึกสอนกลุ่มสาระอื่น
-      return 9;                                                     // ครูต่างระดับชั้น + ต่างกลุ่มสาระ
-    };
-    const tierDiff = tier(m) - tier(n);
-    if (tierDiff !== 0) return tierDiff;
-
-    const mExactClass = doesTeacherTeachExactClass(m, effectiveTargetClass) ? 1 : 0;
-    const nExactClass = doesTeacherTeachExactClass(n, effectiveTargetClass) ? 1 : 0;
-    if (nExactClass !== mExactClass) return nExactClass - mExactClass;
-
-    const mSameGroup = m.g === absentTeacher.g ? 1 : 0;
-    const nSameGroup = n.g === absentTeacher.g ? 1 : 0;
-    if (nSameGroup !== mSameGroup) return nSameGroup - mSameGroup;
-
-    const mSameSub = m.pdfGroup === absentTeacher.pdfGroup ? 1 : 0;
-    const nSameSub = n.pdfGroup === absentTeacher.pdfGroup ? 1 : 0;
-    if (nSameSub !== mSameSub) return nSameSub - mSameSub;
-
-    return m.id - n.id;
   });
+
+  // คำนวณลำดับขั้นความสำคัญล่วงหน้าครั้งเดียวต่อคน เพื่อป้องกันการประมวลผลซ้ำในลูป sort
+  const decorated = filtered.map((u) => {
+    const prevContinuous = doesTeacherTeachPrevPeriodExactClass(
+      u,
+      dateStr,
+      periodIndex,
+      effectiveTargetClass
+    );
+    const sameGrade = doesTeacherTeachGrade(u, effectiveTargetClass);
+    const sameGroup = u.g === absentTeacher.g;
+    let tier = 9;
+    if (!u.isStudentTeacher && prevContinuous) tier = 0;          // ครูประจำการที่เพิ่งสอนห้องนี้ในคาบก่อนหน้า (คาบต่อเนื่อง)
+    else if (!u.isStudentTeacher && sameGrade && sameGroup) tier = 1;  // ครูระดับชั้นเดียวกัน + กลุ่มสาระเดียวกัน
+    else if (!u.isStudentTeacher && sameGrade && !sameGroup) tier = 2; // ครูระดับชั้นเดียวกัน + ต่างกลุ่มสาระ
+    else if (!u.isStudentTeacher && !sameGrade && sameGroup) tier = 3; // ครูกลุ่มสาระเดียวกัน (ระดับชั้นอื่น)
+    else if (u.isStudentTeacher && prevContinuous) tier = 4;           // นศ.ฝึกสอนที่เพิ่งสอนห้องนี้ในคาบก่อนหน้า (คาบต่อเนื่อง)
+    else if (u.isStudentTeacher && sameGrade && sameGroup) tier = 5;   // นศ.ฝึกสอนระดับชั้นเดียวกัน + กลุ่มสาระเดียวกัน
+    else if (u.isStudentTeacher && sameGrade && !sameGroup) tier = 6;  // นศ.ฝึกสอนระดับชั้นเดียวกัน + ต่างกลุ่มสาระ
+    else if (u.isStudentTeacher && !sameGrade && sameGroup) tier = 7;  // นศ.ฝึกสอนกลุ่มสาระเดียวกัน
+    else if (u.isStudentTeacher) tier = 8;                             // นศ.ฝึกสอนกลุ่มสาระอื่น
+
+    const exactClass = doesTeacherTeachExactClass(u, effectiveTargetClass) ? 1 : 0;
+    const sameGroupNum = sameGroup ? 1 : 0;
+    const sameSubNum = u.pdfGroup === absentTeacher.pdfGroup ? 1 : 0;
+    return { u, tier, exactClass, sameGroupNum, sameSubNum };
+  });
+
+  decorated.sort((m, n) => {
+    if (m.tier !== n.tier) return m.tier - n.tier;
+    if (n.exactClass !== m.exactClass) return n.exactClass - m.exactClass;
+    if (n.sameGroupNum !== m.sameGroupNum) return n.sameGroupNum - m.sameGroupNum;
+    if (n.sameSubNum !== m.sameSubNum) return n.sameSubNum - m.sameSubNum;
+    return m.u.id - n.u.id;
+  });
+
+  return decorated.map((item) => item.u);
 }
 
 /**
