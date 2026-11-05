@@ -1320,7 +1320,7 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                       : "px-[36px] py-[32px] text-[15px] leading-[1.35]"
                   }
                 >
-                  <div className="flex items-center justify-center gap-[124px] mb-4">
+                  <div className="flex items-center justify-center gap-[58px] mb-4">
                     <img
                       src={LEFT_SCHOOL_LOGO_URL}
                       alt="ตราโรงเรียนวรคุณอุปถัมภ์"
