@@ -1574,4 +1574,786 @@ export function getAllDiscoveredSubjectCodes(): SubjectCodeInfo[] {
   return results.sort((a, b) => a.code.localeCompare(b.code, "th"));
 }
 
+export interface BulkSubjectParseResult {
+  mappings: Record<string, string>;
+  codeRenames: Record<string, string>;
+  mappingCount: number;
+  renameCount: number;
+}
 
+/**
+ * แปลงข้อความหลายบรรทัด (จากการวาง Excel / Google Sheets / CSV / ข้อความทั่วไป)
+ * รองรับ:
+ * 1) วางจาก Excel 2 คอลัมน์: "ว21102 \t วิทยาศาสตร์พื้นฐาน"
+ * 2) วางจาก Excel/CSV 3 คอลัมน์ (เปลี่ยนรหัสวิชาพร้อมชื่อวิชา): "ว21101 \t ว21102 \t วิทยาศาสตร์พื้นฐาน"
+ * 3) รูปแบบเครื่องหมายลูกศรเปลี่ยนรหัสวิชา: "ว21101 -> ว21102 = วิทยาศาสตร์พื้นฐาน" หรือ "ว21101 -> ว21102"
+ * 4) รูปแบบคั่นด้วย = หรือ , หรือ : หรือ เว้นวรรค: "ว21102 = วิทยาศาสตร์พื้นฐาน" หรือ "ว21102,วิทยาศาสตร์พื้นฐาน"
+ */
+export function parseBulkSubjectLines(rawText: string): BulkSubjectParseResult {
+  const mappings: Record<string, string> = {};
+  const codeRenames: Record<string, string> = {};
+
+  if (!rawText || !rawText.trim()) {
+    return { mappings, codeRenames, mappingCount: 0, renameCount: 0 };
+  }
+
+  // ลบ UTF-8 BOM หากมี
+  const cleanText = rawText.replace(/^\uFEFF/, "");
+  const lines = cleanText.split(/\r?\n/);
+
+  const stripQuotes = (s: string) =>
+    s
+      .trim()
+      .replace(/^"(.*)"$/, "$1")
+      .replace(/""/g, '"')
+      .trim();
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+
+    // ข้ามบรรทัดหัวตาราง (Header row) จาก CSV หรือ Excel
+    if (
+      line.startsWith("รหัสวิชา") ||
+      line.toLowerCase().startsWith("code,") ||
+      line.toLowerCase().startsWith("code\t") ||
+      line.startsWith("#")
+    ) {
+      continue;
+    }
+
+    // กรณีใช้เครื่องหมายลูกศรเปลี่ยนรหัสวิชา เช่น "ว21101 -> ว21102 = วิทยาศาสตร์พื้นฐาน" หรือ "ว21101 -> ว21102\tวิทยาศาสตร์"
+    if (line.includes("->") || line.includes("=>")) {
+      const arrowParts = line.split(/->|=>/);
+      const oldCode = stripQuotes(arrowParts[0] || "");
+      const rightSide = (arrowParts.slice(1).join(" ") || "").trim();
+      if (!oldCode || !rightSide) continue;
+
+      let newCode = "";
+      let subjectName = "";
+
+      if (rightSide.includes("\t")) {
+        const parts = rightSide.split("\t");
+        newCode = stripQuotes(parts[0] || "");
+        subjectName = stripQuotes(parts.slice(1).join(" "));
+      } else if (rightSide.includes("=")) {
+        const parts = rightSide.split("=");
+        newCode = stripQuotes(parts[0] || "");
+        subjectName = stripQuotes(parts.slice(1).join("="));
+      } else if (rightSide.includes(",")) {
+        const parts = rightSide.split(",");
+        newCode = stripQuotes(parts[0] || "");
+        subjectName = stripQuotes(parts.slice(1).join(","));
+      } else {
+        const tokens = rightSide.split(/\s+/);
+        newCode = stripQuotes(tokens[0] || "");
+        subjectName = stripQuotes(tokens.slice(1).join(" "));
+      }
+
+      if (oldCode && newCode && oldCode !== newCode) {
+        codeRenames[oldCode] = newCode;
+      }
+      const targetCode = newCode || oldCode;
+      if (targetCode && subjectName) {
+        mappings[targetCode] = subjectName;
+      }
+      continue;
+    }
+
+    // กรณีคั่นด้วย Tab (วางจาก Excel / Google Sheets)
+    if (line.includes("\t")) {
+      const cols = line.split("\t").map(stripQuotes);
+      // ถาวาง 3 คอลัมน์ขึ้นไป จากไฟล์ส่งออก CSV/Excel: [รหัสวิชาเดิม, รหัสวิชาใหม่, ชื่อวิชา, ...]
+      if (
+        cols.length >= 3 &&
+        cols[0] &&
+        cols[2] &&
+        (cols[1] === "" || /^[ก-ฮA-Za-z0-9-]+$/.test(cols[1]))
+      ) {
+        const oldCode = cols[0];
+        const newCode = cols[1];
+        const name = cols[2];
+        if (newCode && newCode !== oldCode) {
+          codeRenames[oldCode] = newCode;
+        }
+        const effectiveCode = newCode || oldCode;
+        if (effectiveCode && name) {
+          mappings[effectiveCode] = name;
+        }
+        continue;
+      }
+
+      const code = cols[0] || "";
+      const name = cols.slice(1).filter(Boolean).join(" ").trim();
+      if (code && name) {
+        mappings[code] = name;
+      }
+      continue;
+    }
+
+    // กรณีคั่นด้วยเครื่องหมาย =
+    if (line.includes("=")) {
+      const idx = line.indexOf("=");
+      const code = stripQuotes(line.slice(0, idx));
+      const name = stripQuotes(line.slice(idx + 1));
+      if (code && name) {
+        mappings[code] = name;
+      }
+      continue;
+    }
+
+    // กรณี CSV คั่นด้วยจุลภาค (,)
+    if (line.includes(",")) {
+      const cols = line.split(",").map(stripQuotes);
+      if (
+        cols.length >= 3 &&
+        cols[0] &&
+        cols[2] &&
+        (cols[1] === "" || /^[ก-ฮA-Za-z0-9-]+$/.test(cols[1]))
+      ) {
+        const oldCode = cols[0];
+        const newCode = cols[1];
+        const name = cols[2];
+        if (newCode && newCode !== oldCode) {
+          codeRenames[oldCode] = newCode;
+        }
+        const effectiveCode = newCode || oldCode;
+        if (effectiveCode && name) {
+          mappings[effectiveCode] = name;
+        }
+        continue;
+      }
+      const code = cols[0] || "";
+      const name = cols[1] || "";
+      if (code && name) {
+        mappings[code] = name;
+      }
+      continue;
+    }
+
+    // กรณีคั่นด้วย :
+    if (line.includes(":")) {
+      const idx = line.indexOf(":");
+      const code = stripQuotes(line.slice(0, idx));
+      const name = stripQuotes(line.slice(idx + 1));
+      if (code && name) {
+        mappings[code] = name;
+      }
+      continue;
+    }
+
+    // กรณีคั่นด้วยเว้นวรรค เช่น "ว21102 วิทยาศาสตร์พื้นฐาน"
+    const firstSpace = line.search(/\s+/);
+    if (firstSpace > 0) {
+      const code = stripQuotes(line.slice(0, firstSpace));
+      const name = stripQuotes(line.slice(firstSpace));
+      if (code && name) {
+        mappings[code] = name;
+      }
+    }
+  }
+
+  return {
+    mappings,
+    codeRenames,
+    mappingCount: Object.keys(mappings).length,
+    renameCount: Object.keys(codeRenames).length,
+  };
+}
+
+/**
+ * แปลงรายการวิชาเป็นข้อความแบบ Tab-separated เพื่อคัดลอกไปวางใน Excel หรือแก้ไขเป็นชุดได้ทันที
+ */
+export function formatSubjectsForBulkText(subjects: SubjectCodeInfo[]): string {
+  return subjects.map((s) => `${s.code}\t${s.currentName}`).join("\n");
+}
+
+/**
+ * ส่งออกรายการรหัสวิชาและชื่อวิชาเป็นไฟล์ CSV (ใส่ UTF-8 BOM เพื่อเปิดใน Microsoft Excel ภาษาไทยไม่เพี้ยน)
+ */
+export function exportSubjectsToCsv(subjects: SubjectCodeInfo[]): string {
+  const escapeCsv = (val: string) => {
+    const clean = String(val ?? "").replace(/"/g, '""');
+    return /[",\n\r]/.test(clean) ? `"${clean}"` : clean;
+  };
+
+  const header = [
+    "รหัสวิชา",
+    "รหัสวิชาใหม่ (เว้นว่างหากไม่เปลี่ยน)",
+    "ชื่อวิชาที่แสดงในเอกสาร",
+    "ค่าเริ่มต้นระบบ",
+    "ครูผู้สอนในระบบ",
+  ].join(",");
+
+  const rows = subjects.map((s) =>
+    [
+      escapeCsv(s.code),
+      "",
+      escapeCsv(s.currentName),
+      escapeCsv(s.defaultName),
+      escapeCsv(s.teacherNames.join(" / ")),
+    ].join(",")
+  );
+
+  return `\uFEFF${header}\n${rows.join("\n")}`;
+}
+
+/**
+ * แทนที่รหัสวิชาในตารางสอนของครูทุกคน (ทั้งในฟิลด์ s และ coursesSummary) แบบรวดเดียว
+ */
+export function renameCourseCodesInTeachers(
+  teachers: TeacherRecord[],
+  codeRenames: Record<string, string>
+): {
+  updatedTeachers: TeacherRecord[];
+  replacedSlotCount: number;
+  affectedTeachersCount: number;
+} {
+  const cleanRenames: Record<string, string> = {};
+  Object.entries(codeRenames).forEach(([oldCode, newCode]) => {
+    const o = oldCode.trim();
+    const n = newCode.trim();
+    if (o && n && o !== n) {
+      cleanRenames[o] = n;
+    }
+  });
+
+  if (Object.keys(cleanRenames).length === 0) {
+    return {
+      updatedTeachers: teachers,
+      replacedSlotCount: 0,
+      affectedTeachersCount: 0,
+    };
+  }
+
+  let replacedSlotCount = 0;
+  let affectedTeachersCount = 0;
+
+  const updatedTeachers = teachers.map((teacher) => {
+    let teacherModified = false;
+
+    const newDaysStr = (teacher.s || "")
+      .split("|")
+      .map((dayStr) =>
+        dayStr
+          .split(",")
+          .map((rawCell) => {
+            const trimmed = rawCell.trim();
+            if (!trimmed || trimmed === "*" || trimmed.startsWith("#")) {
+              return rawCell;
+            }
+            const [coursePart, customRoom] = trimmed.split("@");
+            const tokens = coursePart.trim().split(/\s+/);
+            const code = tokens[0] || "";
+            if (code && cleanRenames[code]) {
+              const newCode = cleanRenames[code];
+              const restTokens = tokens.slice(1).join(" ");
+              const rebuiltCourse = restTokens ? `${newCode} ${restTokens}` : newCode;
+              const rebuiltCell =
+                customRoom !== undefined ? `${rebuiltCourse}@${customRoom}` : rebuiltCourse;
+              replacedSlotCount++;
+              teacherModified = true;
+              return rebuiltCell;
+            }
+            return rawCell;
+          })
+          .join(",")
+      )
+      .join("|");
+
+    const newCoursesSummary = Array.isArray(teacher.coursesSummary)
+      ? teacher.coursesSummary.map((line) => {
+          const trimmed = String(line || "").trim();
+          const tokens = trimmed.split(/\s+/);
+          const firstToken = tokens[0] || "";
+          if (firstToken && cleanRenames[firstToken]) {
+            teacherModified = true;
+            return [cleanRenames[firstToken], ...tokens.slice(1)].join(" ");
+          }
+          return line;
+        })
+      : [];
+
+    if (!teacherModified) {
+      return teacher;
+    }
+
+    affectedTeachersCount++;
+    return {
+      ...teacher,
+      s: newDaysStr,
+      coursesSummary: newCoursesSummary,
+      d: newDaysStr.split("|").map((day) => day.split(",")),
+    };
+  });
+
+  return {
+    updatedTeachers,
+    replacedSlotCount,
+    affectedTeachersCount,
+  };
+}
+
+/**
+ * สร้างตารางแปลงรหัสวิชาอัตโนมัติเมื่อสลับระหว่าง ภาคเรียนที่ 1 (ลงท้ายเลข 1) และ ภาคเรียนที่ 2 (ลงท้ายเลข 2)
+ * ตามมาตรฐานรหัสวิชา 6 หลักของ สพฐ. เช่น ท21101 <-> ท21102, ค31201 <-> ค31202, ว31101 <-> ว31102
+ */
+export function buildSemesterCourseCodeShiftMap(
+  teachers: TeacherRecord[],
+  targetSemester: "1" | "2"
+): Record<string, string> {
+  const shiftMap: Record<string, string> = {};
+  const fromDigit = targetSemester === "1" ? "2" : "1";
+  const toDigit = targetSemester;
+
+  // รูปแบบรหัสวิชา สพฐ. 6 หลัก เช่น ท21102, ค31202, ว32222, พ23102, อ31102
+  const standardObecCodeRegex = /^([ก-ฮ]\d{4})([12])$/;
+
+  teachers.forEach((t) => {
+    const days = (t.s || "").split("|");
+    days.forEach((dayStr) => {
+      dayStr.split(",").forEach((rawCell) => {
+        const parsed = parseScheduleCell(rawCell, t.r);
+        if (!parsed.isTeachable || !parsed.code) return;
+        const code = parsed.code.trim();
+        const match = code.match(standardObecCodeRegex);
+        if (match && match[2] === fromDigit) {
+          shiftMap[code] = `${match[1]}${toDigit}`;
+        }
+      });
+    });
+  });
+
+  return shiftMap;
+}
+
+/**
+ * คำนวณจำนวนชั่วโมงรวมและสรุปรายวิชาที่สอนอัตโนมัติจากตารางสอน 5 วัน x 7 คาบ
+ */
+export function summarizeTeacherGrid(
+  grid: string[][],
+  defaultRoom = "-"
+): {
+  totalHours: number;
+  coursesSummary: string[];
+} {
+  let teachableCount = 0;
+  let activityCount = 0;
+  const courseClassCounts: Record<string, Record<string, number>> = {};
+
+  for (let d = 0; d < 5; d++) {
+    const row = grid[d] || [];
+    for (let p = 0; p < 7; p++) {
+      const parsed = parseScheduleCell(row[p], defaultRoom);
+      if (parsed.isTeachable && parsed.code) {
+        teachableCount++;
+        const code = parsed.code;
+        const cls = parsed.cls || "-";
+        if (!courseClassCounts[code]) {
+          courseClassCounts[code] = {};
+        }
+        courseClassCounts[code][cls] = (courseClassCounts[code][cls] || 0) + 1;
+      } else if (!parsed.isEmpty) {
+        activityCount++;
+      }
+    }
+  }
+
+  const coursesSummary = Object.entries(courseClassCounts).map(([code, clsMap]) => {
+    const clsParts = Object.entries(clsMap)
+      .map(([cls, count]) => `${cls} [${count}]`)
+      .join(", ");
+    return `${code} ${clsParts}`;
+  });
+
+  // นับรวมคาบสอน + กิจกรรม + PLC มาตรฐาน 5 ชม. (หรือตามจำนวนคาบจริงหากเกิน)
+  const totalHours = teachableCount + activityCount + 5;
+
+  return {
+    totalHours,
+    coursesSummary,
+  };
+}
+
+/**
+ * ส่งออกรายชื่อครูและตารางสอนทั้งหมดเป็นไฟล์ CSV (1 แถว = 1 วันของครู 1 ท่าน, เปิดแก้ไขใน Excel ได้ง่ายมาก)
+ */
+export function exportTeachersToCsv(teachers: TeacherRecord[]): string {
+  const escapeCsv = (val: string | number) => {
+    const clean = String(val ?? "").replace(/"/g, '""');
+    return /[",\n\r]/.test(clean) ? `"${clean}"` : clean;
+  };
+
+  const header = [
+    "รหัสครู",
+    "ชื่อ-สกุล",
+    "กลุ่มสาระหลัก",
+    "กลุ่ม/ฝ่ายบนใบสอนแทน",
+    "ห้องประจำ",
+    "ประเภท(ครูประจำการ/นักศึกษาฝึกสอน)",
+    "วัน",
+    "คาบ 1 (08.40-09.30)",
+    "คาบ 2 (09.30-10.20)",
+    "คาบ 3 (10.20-11.10)",
+    "คาบ 4 (11.10-12.00)",
+    "คาบ 5 (13.00-13.50)",
+    "คาบ 6 (13.50-14.40)",
+    "คาบ 7 (14.40-15.30)",
+  ].join(",");
+
+  const rows: string[] = [];
+
+  teachers.forEach((t) => {
+    const dGrid =
+      t.d && t.d.length === 5
+        ? t.d
+        : (t.s || "||||").split("|").map((day) => day.split(","));
+    const typeLabel = t.isStudentTeacher ? "นักศึกษาฝึกสอน" : "ครูประจำการ";
+
+    DAYS.forEach((dayName, dayIdx) => {
+      const dayCells = dGrid[dayIdx] || [];
+      rows.push(
+        [
+          escapeCsv(t.id),
+          escapeCsv(t.n),
+          escapeCsv(t.g),
+          escapeCsv(t.pdfGroup || t.g),
+          escapeCsv(t.r),
+          escapeCsv(typeLabel),
+          escapeCsv(dayName),
+          escapeCsv(dayCells[0] || ""),
+          escapeCsv(dayCells[1] || ""),
+          escapeCsv(dayCells[2] || ""),
+          escapeCsv(dayCells[3] || ""),
+          escapeCsv(dayCells[4] || ""),
+          escapeCsv(dayCells[5] || ""),
+          escapeCsv(dayCells[6] || ""),
+        ].join(",")
+      );
+    });
+  });
+
+  return `\uFEFF${header}\n${rows.join("\n")}`;
+}
+
+/**
+ * แยกคอลัมน์ CSV 1 บรรทัดโดยรองรับเครื่องหมายอัญประกาศ ("...")
+ */
+function splitCsvLine(line: string): string[] {
+  const result: string[] = [];
+  let cur = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const ch = line[i];
+    if (ch === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        cur += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if ((ch === "," || ch === "\t") && !inQuotes) {
+      result.push(cur.trim());
+      cur = "";
+    } else {
+      cur += ch;
+    }
+  }
+  result.push(cur.trim());
+  return result;
+}
+
+/**
+ * นำเข้าข้อมูลครูและตารางสอนทั้งหมดจากไฟล์ Excel (.csv) ที่ส่งออกไปแก้ไข
+ */
+export function parseTeachersFromCsv(
+  csvText: string,
+  existingTeachers: TeacherRecord[]
+): {
+  teachers: TeacherRecord[];
+  updatedCount: number;
+} {
+  const cleanText = (csvText || "").replace(/^\uFEFF/, "");
+  const lines = cleanText.split(/\r?\n/);
+
+  const byId = new Map<number, TeacherRecord>();
+  existingTeachers.forEach((t) => {
+    const dCopy =
+      t.d && t.d.length === 5
+        ? t.d.map((r) => [...r])
+        : (t.s || "||||").split("|").map((day) => {
+            const parts = day.split(",");
+            return Array.from({ length: 7 }, (_, i) => parts[i] || "");
+          });
+    byId.set(t.id, { ...t, d: dCopy });
+  });
+
+  const touchedIds = new Set<number>();
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line || line.startsWith("รหัสครู") || line.toLowerCase().startsWith("id,")) {
+      continue;
+    }
+
+    const cols = splitCsvLine(line);
+    if (cols.length < 8) continue;
+
+    const id = parseInt(cols[0], 10);
+    if (!Number.isFinite(id) || id <= 0) continue;
+
+    const name = cols[1] || "";
+    const group = cols[2] || "ภาษาไทย";
+    const pdfGroup = cols[3] || group;
+    const room = cols[4] || "-";
+    const typeStr = cols[5] || "";
+    const dayLabel = cols[6] || "";
+
+    const dayIdx = DAYS.findIndex((d) => dayLabel.includes(d));
+    if (dayIdx < 0) continue;
+
+    const periodCells = Array.from({ length: 7 }, (_, idx) =>
+      (cols[7 + idx] || "").replace(/[|,]/g, " ").trim()
+    );
+
+    const existing = byId.get(id);
+    const grid =
+      existing?.d && existing.d.length === 5
+        ? existing.d.map((r) => [...r])
+        : [
+            ["", "", "", "", "", "", "#ชุมนุม"],
+            ["", "", "", "", "", "", "#ฐาน ศก."],
+            ["", "", "", "", "", "", "#กิจกรรม"],
+            ["#โฮมรูม", "", "", "", "", "", "#การป้องกันทุจริต"],
+            ["", "", "", "", "", "", "#แนะแนว"],
+          ];
+
+    grid[dayIdx] = periodCells;
+
+    const { totalHours, coursesSummary } = summarizeTeacherGrid(grid, room);
+    const s = grid.map((r) => r.join(",")).join("|");
+
+    byId.set(id, {
+      id,
+      n: name || existing?.n || `ครูรหัส ${id}`,
+      g: group,
+      pdfGroup,
+      r: room,
+      totalHours,
+      coursesSummary:
+        coursesSummary.length > 0 ? coursesSummary : existing?.coursesSummary || [],
+      otherSummary:
+        existing?.otherSummary ||
+        "PLC [5] กิจกรรม [1] ชุมนุม [1] ฐาน ศก. [1] แนะแนว [1] โฮมรูม ต.ทุจริต [1]",
+      s,
+      isStudentTeacher:
+        typeStr.includes("นักศึกษา") || typeStr.includes("ฝึกสอน")
+          ? true
+          : typeStr.includes("ประจำการ")
+          ? false
+          : Boolean(existing?.isStudentTeacher),
+      d: grid,
+    });
+    touchedIds.add(id);
+  }
+
+  const finalList = Array.from(byId.values()).sort((a, b) => a.id - b.id);
+  return {
+    teachers: finalList,
+    updatedCount: touchedIds.size,
+  };
+}
+
+/**
+ * สร้างข้อความสรุปการจัดสอนแทนสำหรับคัดลอกส่งแจ้งในกลุ่ม LINE โรงเรียน
+ */
+export function formatLineNotificationMessage(
+  absentTeachers: TeacherRecord[],
+  dateStr: string,
+  reason: string,
+  docRows: SubstituteRow[]
+): string {
+  const dayIdx = getDayIndex(dateStr);
+  const dayLabel = dayIdx >= 0 ? `วัน${DAYS[dayIdx]}ที่ ` : "วันที่ ";
+  const fullDate = formatThaiDate(dateStr);
+  const cleanReason = (reason || "ไปราชการ").trim() || "ไปราชการ";
+  const absentNames =
+    absentTeachers.length > 0
+      ? absentTeachers.map((t) => t.n).join(", ")
+      : docRows[0]?.absentTeacherName || "-";
+
+  const lines: string[] = [
+    `📋 แจ้งจัดสอนแทน โรงเรียนวรคุณอุปถัมภ์`,
+    `📅 ${dayLabel}${fullDate}`,
+    `👤 แทน: ${absentNames} (${cleanReason})`,
+    `──────────────────`,
+  ];
+
+  docRows.forEach((row) => {
+    const subDisplay = row.subName || formatCleanSubstituteName(row.n);
+    const roomClassDisplay = row.classRoomLabel || formatClassLevelLabel(row.cls);
+    const subjectDisplay =
+      row.subjectName || getSubjectNameFromCourse(row.code, row.g);
+    const multiTeacherSuffix =
+      absentTeachers.length > 1 && row.absentTeacherName
+        ? ` [แทน ${row.absentTeacherName}]`
+        : "";
+    lines.push(
+      `• คาบ ${row.p} (${row.tm}) | ${roomClassDisplay} | ${row.code} ${subjectDisplay} ➡️ ${subDisplay}${multiTeacherSuffix}`
+    );
+  });
+
+  lines.push(`──────────────────`);
+  lines.push(`ขอขอบคุณคุณครูทุกท่านครับ/ค่ะ 🙏`);
+
+  return lines.join("\n");
+}
+
+export interface SubstituteRecordLike {
+  recordId: string;
+  absentTeacherId: number;
+  absentTeacherIds?: (number | string)[];
+  absentTeacherName: string;
+  selectedDate: string;
+  reason: string;
+  studentTeacherName: string;
+  includeSupervision: boolean;
+  assignments: Record<string, string>;
+}
+
+export interface TeacherSubstituteStat {
+  teacherId: number;
+  teacherName: string;
+  group: string;
+  isStudentTeacher: boolean;
+  substitutedPeriods: number;
+  absentPeriods: number;
+  absentDays: number;
+}
+
+/**
+ * คำนวณสถิติภาระงานการสอนแทนและสถิติการลาสะสมของครูแต่ละท่านจากประวัติที่บันทึกไว้
+ */
+export function computeSubstituteStatistics(
+  records: SubstituteRecordLike[],
+  teachers: TeacherRecord[] = TEACHERS
+): {
+  byTeacherId: Record<number, TeacherSubstituteStat>;
+  sortedList: TeacherSubstituteStat[];
+  totalSubstitutedPeriods: number;
+} {
+  const byTeacherId: Record<number, TeacherSubstituteStat> = {};
+
+  teachers.forEach((t) => {
+    if (isTeacherExemptFromNeedingSubstitute(t) || t.g === "บริหาร" || t.id === 100 || t.id === 101) return;
+    byTeacherId[t.id] = {
+      teacherId: t.id,
+      teacherName: t.n,
+      group: t.pdfGroup || t.g,
+      isStudentTeacher: Boolean(t.isStudentTeacher),
+      substitutedPeriods: 0,
+      absentPeriods: 0,
+      absentDays: 0,
+    };
+  });
+
+  let totalSubstitutedPeriods = 0;
+
+  records.forEach((rec) => {
+    const absentIds =
+      Array.isArray(rec.absentTeacherIds) && rec.absentTeacherIds.length > 0
+        ? rec.absentTeacherIds
+        : [rec.absentTeacherId];
+
+    const uniqueAbsentIds = Array.from(
+      new Set(absentIds.map(Number).filter((id) => id > 0))
+    );
+
+    uniqueAbsentIds.forEach((aid) => {
+      if (byTeacherId[aid]) {
+        byTeacherId[aid].absentDays += 1;
+      }
+    });
+
+    const entries = Object.entries(rec.assignments || {});
+    const hasCompositeKeys = entries.some(([k]) => k.includes("_"));
+
+    entries.forEach(([key, assignVal]) => {
+      if (hasCompositeKeys && !key.includes("_")) {
+        return; // ข้ามคีย์ซ้ำเมื่อมีคีย์แบบ `${teacherId}_${periodIdx}`
+      }
+      if (key.includes("_")) {
+        const aid = Number(key.split("_")[0]);
+        if (aid && byTeacherId[aid]) {
+          byTeacherId[aid].absentPeriods += 1;
+        }
+      } else if (uniqueAbsentIds[0] && byTeacherId[uniqueAbsentIds[0]]) {
+        byTeacherId[uniqueAbsentIds[0]].absentPeriods += 1;
+      }
+
+      if (assignVal && assignVal.startsWith("t")) {
+        const subId = Number(assignVal.slice(1));
+        if (subId && byTeacherId[subId]) {
+          byTeacherId[subId].substitutedPeriods += 1;
+          totalSubstitutedPeriods += 1;
+        }
+      }
+    });
+  });
+
+  const sortedList = Object.values(byTeacherId).sort((a, b) => {
+    if (b.substitutedPeriods !== a.substitutedPeriods) {
+      return b.substitutedPeriods - a.substitutedPeriods;
+    }
+    if (b.absentPeriods !== a.absentPeriods) {
+      return b.absentPeriods - a.absentPeriods;
+    }
+    return a.teacherId - b.teacherId;
+  });
+
+  return {
+    byTeacherId,
+    sortedList,
+    totalSubstitutedPeriods,
+  };
+}
+
+/**
+ * ส่งออกตารางสรุปสถิติการสอนแทนและการลาเป็นไฟล์ CSV สำหรับเปิดใน Excel
+ */
+export function exportSubstituteStatsToCsv(
+  stats: TeacherSubstituteStat[],
+  academicYear: string,
+  semester: string
+): string {
+  const escapeCsv = (val: string | number) => {
+    const clean = String(val ?? "").replace(/"/g, '""');
+    return /[",\n\r]/.test(clean) ? `"${clean}"` : clean;
+  };
+
+  const semLabel = semester === "ฤดูร้อน" ? "ภาคฤดูร้อน" : `ภาคเรียนที่ ${semester}`;
+  const header = [
+    "รหัสครู",
+    "ชื่อ-สกุล",
+    "กลุ่มสาระ/งาน",
+    "ประเภท",
+    `จำนวนคาบที่ช่วยสอนแทนสะสม (${semLabel}/${academicYear})`,
+    "จำนวนครั้งที่ลา/ไปราชการ (ครั้ง)",
+    "จำนวนคาบที่ลา/ไปราชการ (คาบ)",
+  ].join(",");
+
+  const rows = stats.map((st) =>
+    [
+      escapeCsv(st.teacherId),
+      escapeCsv(st.teacherName),
+      escapeCsv(st.group),
+      escapeCsv(st.isStudentTeacher ? "นักศึกษาฝึกสอน" : "ครูประจำการ"),
+      escapeCsv(st.substitutedPeriods),
+      escapeCsv(st.absentDays),
+      escapeCsv(st.absentPeriods),
+    ].join(",")
+  );
+
+  return `\uFEFF${header}\n${rows.join("\n")}`;
+}

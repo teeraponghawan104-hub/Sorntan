@@ -18,6 +18,10 @@ import {
   setRuntimeTeachers,
 } from "../data/teachers";
 import { setRuntimeSubjectMappings } from "./scheduler";
+import {
+  DEFAULT_DOCUMENT_SIGNATORIES,
+  setRuntimeDocumentSignatories,
+} from "./exportDoc";
 import { OperationType, db, handleFirestoreError } from "../firebase";
 
 const LOCAL_TEACHERS_KEY = "worakhun_teachers_db_v4";
@@ -32,13 +36,21 @@ export const SUBJECT_MAPPINGS_DOC_ID = "custom";
 export const ACADEMIC_SETTINGS_DOC_ID = "academic_settings";
 
 export interface AcademicSettings {
-  academicYear: string; // เช่น "2569", "2570"
-  semester: string;     // เช่น "1", "2"
+  academicYear: string;      // เช่น "2569", "2570"
+  semester: string;          // เช่น "1", "2"
+  plannerName: string;       // ชื่อผู้จัดสอนแทน เช่น "นายธีระพงษ์ หาวัน"
+  plannerPosition: string;   // ตำแหน่งผู้จัดสอนแทน เช่น "งานการจัดการเรียนการสอน"
+  approverName: string;      // ชื่อหัวหน้ากลุ่มบริหารวิชาการ เช่น "นายสุทธิศักดิ์ เกตษา"
+  approverPosition: string;  // ตำแหน่งหัวหน้ากลุ่มบริหารวิชาการ เช่น "ผู้ช่วยผู้อำนวยการโรงเรียนวรคุณอุปถัมภ์"
 }
 
 export const DEFAULT_ACADEMIC_SETTINGS: AcademicSettings = {
   academicYear: "2569",
   semester: "2",
+  plannerName: DEFAULT_DOCUMENT_SIGNATORIES.plannerName,
+  plannerPosition: DEFAULT_DOCUMENT_SIGNATORIES.plannerPosition,
+  approverName: DEFAULT_DOCUMENT_SIGNATORIES.approverName,
+  approverPosition: DEFAULT_DOCUMENT_SIGNATORIES.approverPosition,
 };
 
 export interface SavedSubstituteRecord {
@@ -684,25 +696,36 @@ export function sanitizeAcademicSettings(
       ? rawSemester
       : DEFAULT_ACADEMIC_SETTINGS.semester;
 
+  const sig = setRuntimeDocumentSignatories({
+    plannerName: raw?.plannerName,
+    plannerPosition: raw?.plannerPosition,
+    approverName: raw?.approverName,
+    approverPosition: raw?.approverPosition,
+  });
+
   return {
     academicYear: cleanYear,
     semester: cleanSemester,
+    plannerName: sig.plannerName,
+    plannerPosition: sig.plannerPosition,
+    approverName: sig.approverName,
+    approverPosition: sig.approverPosition,
   };
 }
 
 export function loadLocalAcademicSettings(): AcademicSettings {
   try {
     if (typeof localStorage === "undefined") {
-      return { ...DEFAULT_ACADEMIC_SETTINGS };
+      return sanitizeAcademicSettings(DEFAULT_ACADEMIC_SETTINGS);
     }
     const raw = localStorage.getItem(LOCAL_ACADEMIC_SETTINGS_KEY);
     if (!raw) {
-      return { ...DEFAULT_ACADEMIC_SETTINGS };
+      return sanitizeAcademicSettings(DEFAULT_ACADEMIC_SETTINGS);
     }
     const parsed = JSON.parse(raw) as Partial<AcademicSettings>;
     return sanitizeAcademicSettings(parsed);
   } catch {
-    return { ...DEFAULT_ACADEMIC_SETTINGS };
+    return sanitizeAcademicSettings(DEFAULT_ACADEMIC_SETTINGS);
   }
 }
 

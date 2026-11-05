@@ -13,6 +13,7 @@ import {
   buildCombinedTeacherHeader,
   getInitialWeekdayDate,
   isTeacherExemptFromNeedingSubstitute,
+  renameCourseCodesInTeachers,
 } from "./utils/scheduler";
 import { OperationType, db, handleFirestoreError } from "./firebase";
 import {
@@ -101,8 +102,8 @@ export default function App() {
     );
   });
 
-  const [focusTimetableTeacherId, setFocusTimetableTeacherId] = useState<number | null>(
-    null
+  const [focusTimetableTeacherIds, setFocusTimetableTeacherIds] = useState<number[]>(
+    []
   );
 
   useEffect(() => {
@@ -487,8 +488,11 @@ export default function App() {
     });
   };
 
-  const handleViewTeacherTimetable = (teacherId: number) => {
-    setFocusTimetableTeacherId(teacherId);
+  const handleViewTeacherTimetable = (teacherIdOrIds: number | number[]) => {
+    const ids = (Array.isArray(teacherIdOrIds) ? teacherIdOrIds : [teacherIdOrIds])
+      .map(Number)
+      .filter((id) => id > 0);
+    setFocusTimetableTeacherIds(ids);
     setActiveTab("timetables");
   };
 
@@ -630,6 +634,43 @@ export default function App() {
     setSubjectMappings({ ...updated });
   };
 
+  // CRUD: เปลี่ยนรหัสวิชาแบบกลุ่มในตารางสอนของครูทุกคน พร้อมอัปเดตชื่อวิชาที่ผูกไว้ในครั้งเดียว
+  const handleBulkRenameCourseCodes = async (
+    codeRenames: Record<string, string>,
+    extraMappings?: Record<string, string>
+  ): Promise<{ replacedSlotCount: number; affectedTeachersCount: number }> => {
+    const { updatedTeachers, replacedSlotCount, affectedTeachersCount } =
+      renameCourseCodesInTeachers(teachers, codeRenames);
+
+    if (affectedTeachersCount > 0) {
+      const syncedTeachers = await syncAllTeachersToCloud(updatedTeachers);
+      setTeachers(syncedTeachers);
+    }
+
+    const nextMappings: Record<string, string> = { ...subjectMappings };
+    Object.entries(codeRenames).forEach(([oldCode, newCode]) => {
+      if (oldCode && newCode && oldCode !== newCode && nextMappings[oldCode]) {
+        if (!nextMappings[newCode]) {
+          nextMappings[newCode] = nextMappings[oldCode];
+        }
+        delete nextMappings[oldCode];
+      }
+    });
+
+    if (extraMappings) {
+      Object.entries(extraMappings).forEach(([code, name]) => {
+        if (code.trim() && name.trim()) {
+          nextMappings[code.trim()] = name.trim();
+        }
+      });
+    }
+
+    const updatedMappings = await saveSubjectMappingsToCloud(nextMappings);
+    setSubjectMappings({ ...updatedMappings });
+
+    return { replacedSlotCount, affectedTeachersCount };
+  };
+
   // CRUD: บันทึกปีการศึกษาและภาคเรียนลงฐานข้อมูลกลาง และปรับปีของวันที่จัดสอนแทนให้ตรงกับปีการศึกษาใหม่ทันที
   const handleSaveAcademicSettings = async (newSettings: AcademicSettings) => {
     const updated = await saveAcademicSettingsToCloud(newSettings);
@@ -661,7 +702,7 @@ export default function App() {
       <Header
         activeTab={activeTab}
         onSelectTab={(tab) => {
-          if (tab !== "timetables") setFocusTimetableTeacherId(null);
+          if (tab !== "timetables") setFocusTimetableTeacherIds([]);
           setActiveTab(tab);
         }}
         darkMode={darkMode}
@@ -703,7 +744,9 @@ export default function App() {
           <MasterTimetableView
             teachers={teachers}
             academicSettings={academicSettings}
-            initialFocusTeacherId={focusTimetableTeacherId}
+            initialFocusTeacherIds={focusTimetableTeacherIds}
+            onClearFocusTeachers={() => setFocusTimetableTeacherIds([])}
+            onBackToPlanner={() => setActiveTab("planner")}
             onSelectTeacherForSubstitute={handleSelectTeacherFromDirectory}
             onOpenAddTeacher={() => {
               setEditingTeacher(null);
@@ -741,12 +784,23 @@ export default function App() {
             }}
             onDeleteTeacher={handleDeleteTeacher}
             onResetDefaultTeachers={handleResetDefaultTeachers}
+            onBulkSaveTeachers={async (nextTeachers) => {
+              const updated = await syncAllTeachersToCloud(nextTeachers);
+              setTeachers(updated);
+              const nextAssignments = autoAssignCombinedSubstitutes(
+                absentTeacherIds,
+                selectedDate,
+                includeSupervision
+              );
+              setAssignments(nextAssignments);
+            }}
             onLoadSubstituteRecord={handleLoadSubstituteRecord}
             onDeleteSubstituteRecord={handleDeleteSubstituteRecord}
             onClearAllSubstituteRecords={handleClearAllSubstituteRecords}
             onViewTeacherTimetable={handleViewTeacherTimetable}
             onSaveSubjectMappings={handleSaveSubjectMappings}
             onResetSubjectMappings={handleResetSubjectMappings}
+            onBulkRenameCourseCodes={handleBulkRenameCourseCodes}
           />
         )}
       </main>

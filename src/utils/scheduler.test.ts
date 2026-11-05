@@ -718,4 +718,130 @@ test("adjustDateToAcademicYear shifts date to target Buddhist Era year and ensur
   assert.equal(formatShortThaiDate(date2571), "06/11/71");
 });
 
+test("Bulk subject & course code tools: parseBulkSubjectLines, exportSubjectsToCsv, renameCourseCodesInTeachers, and buildSemesterCourseCodeShiftMap", async () => {
+  const {
+    parseBulkSubjectLines,
+    exportSubjectsToCsv,
+    getAllDiscoveredSubjectCodes,
+    renameCourseCodesInTeachers,
+    buildSemesterCourseCodeShiftMap,
+  } = await import("./scheduler");
 
+  // 1. Test Excel tab-separated, CSV, =, and arrow course code renames in one block
+  const bulkInput = [
+    "รหัสวิชา\tชื่อวิชาที่แสดงในเอกสาร",
+    "ว21102\tวิทยาศาสตร์และเทคโนโลยี 2",
+    "ค31102 = คณิตศาสตร์พื้นฐาน ม.4",
+    "ท21102,ภาษาไทยพื้นฐาน 2",
+    "ว31242 -> ว31241 = ชีววิทยาเพิ่มเติม 1",
+    "อ21102\tอ21101\tภาษาอังกฤษพื้นฐาน 1",
+  ].join("\n");
+
+  const parsed = parseBulkSubjectLines(bulkInput);
+  assert.equal(parsed.mappingCount, 5);
+  assert.equal(parsed.renameCount, 2);
+  assert.equal(parsed.mappings["ว21102"], "วิทยาศาสตร์และเทคโนโลยี 2");
+  assert.equal(parsed.mappings["ค31102"], "คณิตศาสตร์พื้นฐาน ม.4");
+  assert.equal(parsed.mappings["ท21102"], "ภาษาไทยพื้นฐาน 2");
+  assert.equal(parsed.mappings["ว31241"], "ชีววิทยาเพิ่มเติม 1");
+  assert.equal(parsed.mappings["อ21101"], "ภาษาอังกฤษพื้นฐาน 1");
+  assert.equal(parsed.codeRenames["ว31242"], "ว31241");
+  assert.equal(parsed.codeRenames["อ21102"], "อ21101");
+
+  // 2. Test CSV export round-trip
+  const subjects = getAllDiscoveredSubjectCodes();
+  const csv = exportSubjectsToCsv(subjects);
+  assert.ok(csv.startsWith("\uFEFFรหัสวิชา,"));
+  const roundTrip = parseBulkSubjectLines(csv);
+  assert.equal(roundTrip.mappingCount, subjects.length);
+
+  // 3. Test renaming course codes in teachers' timetables
+  const { updatedTeachers, replacedSlotCount, affectedTeachersCount } =
+    renameCourseCodesInTeachers(INITIAL_TEACHERS, { ว31242: "ว31241" });
+  assert.ok(replacedSlotCount >= 3);
+  assert.equal(affectedTeachersCount, 1); // Teacher 305
+  const updated305 = updatedTeachers.find((t) => t.id === 305);
+  assert.ok(updated305?.s.includes("ว31241 4/1"));
+  assert.ok(!updated305?.s.includes("ว31242"));
+
+  // 4. Test automatic Semester 2 -> Semester 1 course code shifter
+  const shiftToSem1 = buildSemesterCourseCodeShiftMap(INITIAL_TEACHERS, "1");
+  assert.equal(shiftToSem1["ท22102"], "ท22101");
+  assert.equal(shiftToSem1["ค31102"], "ค31101");
+  assert.equal(shiftToSem1["ว31242"], "ว31241");
+  assert.ok(Object.keys(shiftToSem1).length >= 30);
+});
+
+test("LINE notification formatter, substitute workload statistics, and dynamic signatories work end-to-end", async () => {
+  const {
+    formatLineNotificationMessage,
+    computeSubstituteStatistics,
+    exportSubstituteStatsToCsv,
+  } = await import("./scheduler");
+  const {
+    setRuntimeDocumentSignatories,
+    DEFAULT_DOCUMENT_SIGNATORIES,
+    generateDocxBlob,
+  } = await import("./exportDoc");
+  const JSZip = (await import("jszip")).default;
+
+  // 1. Test LINE notification formatting
+  const t102 = TEACHERS.find((t) => t.id === 102)!;
+  const dateStr = "2026-11-02";
+  const asg = autoAssignCombinedSubstitutes([102], dateStr);
+  const rows = buildCombinedDocumentRows([102], dateStr, asg, "");
+  const lineMsg = formatLineNotificationMessage([t102], dateStr, "ไปราชการ", rows);
+  assert.ok(lineMsg.includes("📋 แจ้งจัดสอนแทน โรงเรียนวรคุณอุปถัมภ์"));
+  assert.ok(lineMsg.includes("👤 แทน: ครูรติพงษ์ รักษาพันธุ์ (ไปราชการ)"));
+  assert.ok(lineMsg.includes("• คาบ 1"));
+
+  // 2. Test substitute workload statistics calculation & CSV export
+  const mockRecords = [
+    {
+      recordId: "r1",
+      absentTeacherId: 102,
+      absentTeacherIds: [102],
+      absentTeacherName: "ครูรติพงษ์ รักษาพันธุ์",
+      selectedDate: "2026-11-02",
+      reason: "ไปราชการ",
+      studentTeacherName: "",
+      includeSupervision: false,
+      assignments: {
+        "102_0": "t301",
+        "102_1": "t303",
+        "0": "t301",
+        "1": "t303",
+      },
+    },
+  ];
+  const stats = computeSubstituteStatistics(mockRecords, INITIAL_TEACHERS);
+  assert.equal(stats.totalSubstitutedPeriods, 2);
+  assert.equal(stats.byTeacherId[301].substitutedPeriods, 1);
+  assert.equal(stats.byTeacherId[303].substitutedPeriods, 1);
+  assert.equal(stats.byTeacherId[102].absentDays, 1);
+  assert.equal(stats.byTeacherId[102].absentPeriods, 2);
+
+  const statsCsv = exportSubstituteStatsToCsv(stats.sortedList, "2569", "2");
+  assert.ok(statsCsv.startsWith("\uFEFFรหัสครู,ชื่อ-สกุล,"));
+  assert.ok(statsCsv.includes("ครูเมธาวี สายสิน"));
+
+  // 3. Test custom document signatories in Word (.docx)
+  setRuntimeDocumentSignatories({
+    plannerName: "นางสาวทดสอบ จัดตาราง",
+    plannerPosition: "งานวิชาการโรงเรียน",
+    approverName: "นายผู้อนุมัติ ทดสอบ",
+    approverPosition: "รองผู้อำนวยการฝ่ายวิชาการ",
+  });
+
+  const blob = await generateDocxBlob(t102, dateStr, "ไปราชการ", rows);
+  const buf = Buffer.from(await blob.arrayBuffer());
+  const zip = await JSZip.loadAsync(buf);
+  const docXml = await zip.file("word/document.xml")!.async("string");
+  assert.ok(docXml.includes("(นางสาวทดสอบ จัดตาราง)"));
+  assert.ok(docXml.includes("งานวิชาการโรงเรียน"));
+  assert.ok(docXml.includes("(นายผู้อนุมัติ ทดสอบ)"));
+  assert.ok(docXml.includes("รองผู้อำนวยการฝ่ายวิชาการ"));
+
+  // Reset signatories back to default
+  setRuntimeDocumentSignatories(DEFAULT_DOCUMENT_SIGNATORIES);
+});

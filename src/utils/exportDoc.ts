@@ -361,6 +361,53 @@ function resolveRowAbsentTeacherName(row: SubstituteRow, absentTeacher: TeacherR
 export const TH_SARABUN_FONT_STACK =
   "'THSarabunNewWeb', 'TH Sarabun PSK', 'THSarabunPSK', 'TH Sarabun New', sans-serif";
 
+export interface DocumentSignatories {
+  plannerName: string;
+  plannerPosition: string;
+  approverName: string;
+  approverPosition: string;
+}
+
+export const DEFAULT_DOCUMENT_SIGNATORIES: DocumentSignatories = {
+  plannerName: "นายธีระพงษ์ หาวัน",
+  plannerPosition: "งานการจัดการเรียนการสอน",
+  approverName: "นายสุทธิศักดิ์ เกตษา",
+  approverPosition: "ผู้ช่วยผู้อำนวยการโรงเรียนวรคุณอุปถัมภ์",
+};
+
+let runtimeSignatories: DocumentSignatories = { ...DEFAULT_DOCUMENT_SIGNATORIES };
+
+export function setRuntimeDocumentSignatories(
+  next?: Partial<DocumentSignatories> | null
+): DocumentSignatories {
+  runtimeSignatories = {
+    plannerName:
+      String(next?.plannerName || "").trim() ||
+      DEFAULT_DOCUMENT_SIGNATORIES.plannerName,
+    plannerPosition:
+      String(next?.plannerPosition || "").trim() ||
+      DEFAULT_DOCUMENT_SIGNATORIES.plannerPosition,
+    approverName:
+      String(next?.approverName || "").trim() ||
+      DEFAULT_DOCUMENT_SIGNATORIES.approverName,
+    approverPosition:
+      String(next?.approverPosition || "").trim() ||
+      DEFAULT_DOCUMENT_SIGNATORIES.approverPosition,
+  };
+  return runtimeSignatories;
+}
+
+export function getRuntimeDocumentSignatories(): DocumentSignatories {
+  return runtimeSignatories;
+}
+
+function formatParenSignatoryName(name: string): string {
+  const clean = String(name || "").trim();
+  if (!clean) return "()";
+  if (clean.startsWith("(") && clean.endsWith(")")) return clean;
+  return `(${clean})`;
+}
+
 /**
  * แบ่งแถวคาบสอนแทนออกเป็นหน้าๆ โดยอิงจากขอบกระดาษ A4 แนวนอน (เอกสารราชการ)
  * - หน้าที่มีกล่องลงนาม (หน้าเดียว หรือหน้าสุดท้าย): บรรจุได้สูงสุด 13 คาบ เพื่อให้เต็มพื้นที่หน้าก่อนตัดหน้าอย่างสวยงาม
@@ -655,7 +702,8 @@ export async function renderPaperPageCanvas(
     ctx.fillStyle = "#000000";
     ctx.textAlign = "center";
 
-    // กล่องซ้าย: ผู้จัดสอนแทน (นายธีระพงษ์ หาวัน)
+    // กล่องซ้าย: ผู้จัดสอนแทน
+    const sig = getRuntimeDocumentSignatories();
     const leftBoxX = marginX + 58;
     const leftBoxW = 318;
     ctx.strokeRect(leftBoxX, sigBoxY, leftBoxW, sigBoxHeight);
@@ -674,7 +722,7 @@ export async function renderPaperPageCanvas(
 
     drawFittedCellLine(
       ctx,
-      "(นายธีระพงษ์ หาวัน)",
+      formatParenSignatoryName(sig.plannerName),
       leftCenterX,
       sigBoxY + 62,
       leftBoxW - 20,
@@ -684,7 +732,7 @@ export async function renderPaperPageCanvas(
     );
     drawFittedCellLine(
       ctx,
-      "งานการจัดการเรียนการสอน",
+      sig.plannerPosition,
       leftCenterX,
       sigBoxY + 92,
       leftBoxW - 20,
@@ -693,7 +741,7 @@ export async function renderPaperPageCanvas(
       fontStack
     );
 
-    // กล่องขวา: หัวหน้ากลุ่มบริหารวิชาการ (นายสุทธิศักดิ์ เกตษา)
+    // กล่องขวา: หัวหน้ากลุ่มบริหารวิชาการ
     const rightBoxX = marginX + 526;
     const rightBoxW = 402;
     ctx.strokeRect(rightBoxX, sigBoxY, rightBoxW, sigBoxHeight);
@@ -711,7 +759,7 @@ export async function renderPaperPageCanvas(
     );
     drawFittedCellLine(
       ctx,
-      "(นายสุทธิศักดิ์ เกตษา)",
+      formatParenSignatoryName(sig.approverName),
       rightCenterX,
       sigBoxY + 62,
       rightBoxW - 20,
@@ -721,7 +769,7 @@ export async function renderPaperPageCanvas(
     );
     drawFittedCellLine(
       ctx,
-      "ผู้ช่วยผู้อำนวยการโรงเรียนวรคุณอุปถัมภ์",
+      sig.approverPosition,
       rightCenterX,
       sigBoxY + 92,
       rightBoxW - 20,
@@ -906,12 +954,20 @@ function buildDocxSheetBodyXml(
   const sigWidths = [858, 4706, 2220, 5950, 1466];
   const sigGridXml = `<w:tblGrid>${sigWidths.map((w) => `<w:gridCol w:w="${w}"/>`).join("")}</w:tblGrid>`;
 
+  const sig = getRuntimeDocumentSignatories();
   const leftSigLine1 = "ลงชื่อ.................................ผู้จัดสอนแทน";
+  const leftSigLine2 = formatParenSignatoryName(sig.plannerName);
+  const leftSigLine3 = sig.plannerPosition;
   const rightSigLine1 = "ลงชื่อ.................................หัวหน้ากลุ่มบริหารวิชาการ";
+  const rightSigLine2 = formatParenSignatoryName(sig.approverName);
+  const rightSigLine3 = sig.approverPosition;
   const leftSigZ1 = measureFittedHalfPoints(leftSigLine1, 318 - 20, 21.3, "400");
+  const leftSigZ2 = measureFittedHalfPoints(leftSigLine2, 318 - 20, 21.3, "400");
+  const leftSigZ3 = measureFittedHalfPoints(leftSigLine3, 318 - 20, 21.3, "400");
   const rightSigZ1 = measureFittedHalfPoints(rightSigLine1, 402 - 20, 21.3, "400");
+  const rightSigZ2 = measureFittedHalfPoints(rightSigLine2, 402 - 20, 21.3, "400");
   const rightSigZ3 = measureFittedHalfPoints(
-    "ผู้ช่วยผู้อำนวยการโรงเรียนวรคุณอุปถัมภ์",
+    rightSigLine3,
     402 - 20,
     21.3,
     "400"
@@ -926,9 +982,9 @@ function buildDocxSheetBodyXml(
     bBefore: 20,
     a: 60,
     z: leftSigZ1,
-  })}${P("(นายธีระพงษ์ หาวัน)", { c: 1, bBefore: 0, a: 60, z: 32 })}${P(
-    "งานการจัดการเรียนการสอน",
-    { c: 1, bBefore: 0, a: 20, z: 32 }
+  })}${P(leftSigLine2, { c: 1, bBefore: 0, a: 60, z: leftSigZ2 })}${P(
+    leftSigLine3,
+    { c: 1, bBefore: 0, a: 20, z: leftSigZ3 }
   )}</w:tc><w:tc><w:tcPr><w:tcW w:w="${
     sigWidths[2]
   }" w:type="dxa"/>${noBorders}</w:tcPr>${P("", { z: 4 })}</w:tc><w:tc><w:tcPr><w:tcW w:w="${
@@ -938,8 +994,8 @@ function buildDocxSheetBodyXml(
     bBefore: 20,
     a: 60,
     z: rightSigZ1,
-  })}${P("(นายสุทธิศักดิ์ เกตษา)", { c: 1, bBefore: 0, a: 60, z: 32 })}${P(
-    "ผู้ช่วยผู้อำนวยการโรงเรียนวรคุณอุปถัมภ์",
+  })}${P(rightSigLine2, { c: 1, bBefore: 0, a: 60, z: rightSigZ2 })}${P(
+    rightSigLine3,
     { c: 1, bBefore: 0, a: 20, z: rightSigZ3 }
   )}</w:tc><w:tc><w:tcPr><w:tcW w:w="${
     sigWidths[4]

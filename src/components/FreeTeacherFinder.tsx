@@ -14,7 +14,7 @@ import {
   isSchoolAdministrator,
   parseScheduleCell,
 } from "../utils/scheduler";
-import { AcademicSettings, DEFAULT_ACADEMIC_SETTINGS } from "../utils/databaseStore";
+import { AcademicSettings } from "../utils/databaseStore";
 
 interface FreeTeacherFinderProps {
   teachers: TeacherRecord[];
@@ -26,7 +26,6 @@ const GRADE_LEVEL_FILTERS = ["ทั้งหมด", "1", "2", "3", "4", "5", "
 
 export const FreeTeacherFinder: React.FC<FreeTeacherFinderProps> = ({
   teachers,
-  academicSettings = DEFAULT_ACADEMIC_SETTINGS,
   onSelectTeacherForSubstitute,
 }) => {
   const [dayIdx, setDayIdx] = useState<number>(0); // 0 = จันทร์
@@ -35,10 +34,6 @@ export const FreeTeacherFinder: React.FC<FreeTeacherFinderProps> = ({
   const [filterGroup, setFilterGroup] = useState<string>("ทั้งหมด");
 
   const studentCount = teachers.filter((t) => Boolean(t.isStudentTeacher)).length;
-  const semesterLabel =
-    academicSettings.semester === "ฤดูร้อน"
-      ? "ภาคฤดูร้อน"
-      : `ภาคเรียนที่ ${academicSettings.semester}`;
 
   const teachersInScope = teachers.filter((t) => {
     if (t.id === 302) return false; // 302 ย้ายไปโรงเรียนอื่น (คาบสอนทั้งหมดไปอยู่กับ 305 ครูศักดิ์ชัย แสงมาศ)
@@ -66,14 +61,9 @@ export const FreeTeacherFinder: React.FC<FreeTeacherFinderProps> = ({
     <div className="space-y-5">
       <section className="bg-white dark:bg-[#14204a] border border-[#c9d4ec] dark:border-[#2a3a6e] rounded-xl p-4 sm:p-5 shadow-xs">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-          <div>
-            <h2 className="text-xl font-bold text-[#0f2150] dark:text-[#e9eefc]">
-              เช็คครูว่างรายคาบ (ตรวจสอบผู้พร้อมสอนแทนตามระดับชั้นและกลุ่มสาระ)
-            </h2>
-            <p className="text-sm text-[#51608a] dark:text-[#9fb0dc] mt-0.5">
-              {semesterLabel} ปีการศึกษา {academicSettings.academicYear} · เลือกวัน คาบเรียน ระดับชั้น และกลุ่มสาระ เพื่อดูรายชื่อครูประจำการและนักศึกษาฝึกสอนที่ว่างพร้อมสอนแทน
-            </p>
-          </div>
+          <h2 className="text-xl font-bold text-[#0f2150] dark:text-[#e9eefc]">
+            เช็คครูว่างรายคาบ
+          </h2>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">

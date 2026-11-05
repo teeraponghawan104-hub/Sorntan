@@ -56,8 +56,8 @@ export const Header: React.FC<HeaderProps> = ({
                   </span>
                 </button>
               </div>
-              <p className="text-[12px] sm:text-xs text-blue-100/90 leading-snug mt-0.5">
-                {semesterLabel} ปีการศึกษา {academicSettings.academicYear} · พัฒนาโดย นักศึกษาฝึกวิชาชีพครู นายธีระพงษ์ หาวัน
+              <p className="text-[12px] sm:text-xs text-blue-100/85 leading-snug mt-0.5">
+                พัฒนาโดย นักศึกษาฝึกวิชาชีพครู นายธีระพงษ์ หาวัน
               </p>
             </div>
           </div>

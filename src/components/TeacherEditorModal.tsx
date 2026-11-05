@@ -1,6 +1,7 @@
 import React, { useState } from "react";
-import { X, Save, Plus, Trash2 } from "lucide-react";
+import { X, Save, Plus, Trash2, Wand2, RotateCcw } from "lucide-react";
 import { DAYS, PERIOD_TIMES, TeacherRecord } from "../data/teachers";
+import { summarizeTeacherGrid } from "../utils/scheduler";
 
 interface TeacherEditorModalProps {
   initialTeacher: TeacherRecord | null; // null = เพิ่มครูใหม่
@@ -95,6 +96,59 @@ export const TeacherEditorModal: React.FC<TeacherEditorModalProps> = ({
     });
   };
 
+  // รองรับการก๊อปปี้ตาราง 5 วัน x 7 คาบจาก Excel มาวาง (Ctrl+V) ลงในช่องตารางโดยตรง
+  const handleCellPaste = (
+    e: React.ClipboardEvent<HTMLInputElement>,
+    startDay: number,
+    startPeriod: number
+  ) => {
+    const pasted = e.clipboardData?.getData("text") || "";
+    if (!pasted.includes("\t") && !pasted.includes("\n")) return;
+
+    e.preventDefault();
+    const rows = pasted.replace(/\r/g, "").split("\n").filter((r, idx, arr) => idx < arr.length - 1 || r.trim() !== "");
+    setGrid((prev) => {
+      const next = prev.map((r) => [...r]);
+      rows.forEach((rowStr, rOffset) => {
+        const dIdx = startDay + rOffset;
+        if (dIdx >= 5) return;
+        const cols = rowStr.split("\t");
+        cols.forEach((cellVal, cOffset) => {
+          const pIdx = startPeriod + cOffset;
+          if (pIdx >= 7) return;
+          next[dIdx][pIdx] = cellVal.replace(/[|,]/g, " ").trim();
+        });
+      });
+      const auto = summarizeTeacherGrid(next, room);
+      setTotalHours(String(auto.totalHours));
+      if (auto.coursesSummary.length > 0) {
+        setCoursesText(auto.coursesSummary.join("\n"));
+      }
+      return next;
+    });
+  };
+
+  // คำนวณชั่วโมงรวมและสรุปรายวิชาจากตาราง 5x7 อัตโนมัติในคลิกเดียว
+  const handleAutoSummarizeFromGrid = () => {
+    const auto = summarizeTeacherGrid(grid, room);
+    setTotalHours(String(auto.totalHours));
+    setCoursesText(auto.coursesSummary.join("\n"));
+  };
+
+  // ล้างเฉพาะวิชาเรียนเพื่อจัดตารางภาคเรียนใหม่ (คงโฮมรูมและกิจกรรมคาบ 7 ไว้)
+  const handleClearAcademicClassesOnly = () => {
+    const freshGrid = [
+      ["", "", "", "", "", "", "#ชุมนุม"],
+      ["", "", "", "", "", "", "#ฐาน ศก."],
+      ["", "", "", "", "", "", "#กิจกรรม"],
+      ["#โฮมรูม", "", "", "", "", "", "#การป้องกันทุจริต"],
+      ["", "", "", "", "", "", "#แนะแนว"],
+    ];
+    setGrid(freshGrid);
+    setCoursesText("");
+    setTotalHours("11");
+  };
+
   const applyQuickTagToActiveCell = (tagValue: string) => {
     if (!activeCell) return;
     handleCellChange(activeCell.day, activeCell.period, tagValue);
@@ -122,11 +176,14 @@ export const TeacherEditorModal: React.FC<TeacherEditorModalProps> = ({
       .map((row) => row.map((c) => c.replace(/[|,]/g, " ").trim()).join(","))
       .join("|");
 
-    const coursesSummary = coursesText
+    const autoSummary = summarizeTeacherGrid(grid, room);
+    const manualLines = coursesText
       .split("\n")
       .map((l) => l.trim())
       .filter(Boolean)
       .slice(0, 15);
+    const coursesSummary =
+      manualLines.length > 0 ? manualLines : autoSummary.coursesSummary;
 
     const record: TeacherRecord = {
       id: numId,
@@ -134,7 +191,10 @@ export const TeacherEditorModal: React.FC<TeacherEditorModalProps> = ({
       g: group.trim() || "ภาษาไทย",
       pdfGroup: pdfGroup.trim() || group.trim() || "ภาษาไทย",
       r: room.trim() || "-",
-      totalHours: Math.max(0, Math.min(60, Number(totalHours) || 0)),
+      totalHours: Math.max(
+        0,
+        Math.min(60, Number(totalHours) || autoSummary.totalHours || 0)
+      ),
       coursesSummary,
       otherSummary: otherSummary.trim(),
       s,
@@ -293,17 +353,35 @@ export const TeacherEditorModal: React.FC<TeacherEditorModalProps> = ({
             </div>
           </div>
 
-          {/* ตารางสอน 5 วัน x 7 คาบ แบบแก้ไขรายช่อง */}
+          {/* ตารางสอน 5 วัน x 7 คาบ แบบแก้ไขรายช่อง + รองรับวางจาก Excel */}
           <div className="border border-[#c9d4ec] dark:border-[#2a3a6e] rounded-xl p-3 sm:p-4 bg-[#f8faff] dark:bg-[#0b1330]/60">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
               <div>
                 <h4 className="text-sm font-bold text-[#0f2150] dark:text-[#e9eefc]">
-                  ตารางสอน 5 วัน × 7 คาบ (เว้นว่าง = ว่างพร้อมสอนแทน)
+                  ตารางสอน 5 วัน × 7 คาบ (เว้นว่าง = ว่างพร้อมสอนแทน · รองรับก๊อปปี้จาก Excel มาวางได้)
                 </h4>
                 <p className="text-xs text-[#51608a] dark:text-[#9fb0dc]">
                   รูปแบบวิชา: <b>รหัสวิชา ชั้น</b> (เช่น <code>ท33102 6/1</code> หรือระบุห้อง{" "}
                   <code>ว22104 2/1@201</code>)
                 </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={handleAutoSummarizeFromGrid}
+                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[#0b7a4b] hover:bg-[#085c38] text-white text-xs font-bold cursor-pointer"
+                >
+                  <Wand2 className="w-3.5 h-3.5" />
+                  <span>คำนวณชั่วโมง & สรุปวิชาอัตโนมัติ</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleClearAcademicClassesOnly}
+                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-[#c9d4ec] dark:border-[#2a3a6e] bg-white dark:bg-[#14204a] text-[#51608a] dark:text-[#9fb0dc] hover:text-red-600 text-xs font-semibold cursor-pointer"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>ล้างวิชาเพื่อจัดเทอมใหม่</span>
+                </button>
               </div>
             </div>
 
@@ -366,6 +444,7 @@ export const TeacherEditorModal: React.FC<TeacherEditorModalProps> = ({
                               value={grid[dIdx]?.[pIdx] || ""}
                               onFocus={() => setActiveCell({ day: dIdx, period: pIdx })}
                               onChange={(e) => handleCellChange(dIdx, pIdx, e.target.value)}
+                              onPaste={(e) => handleCellPaste(e, dIdx, pIdx)}
                               placeholder="ว่าง"
                               aria-label={`วัน${dayName} คาบที่ ${pIdx + 1}`}
                               className="w-full px-1.5 py-1 rounded bg-white dark:bg-[#0b1330] text-[#0f2150] dark:text-[#e9eefc] text-xs border border-transparent focus:border-[#1b4fb8] focus:outline-none"
@@ -384,13 +463,13 @@ export const TeacherEditorModal: React.FC<TeacherEditorModalProps> = ({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-bold text-[#0f2150] dark:text-[#e9eefc] mb-1">
-                สรุปรายวิชาที่สอน (บรรทัดละ 1 วิชา สำหรับแสดงท้ายตาราง)
+                สรุปรายวิชาที่สอน (กดปุ่มคำนวณอัตโนมัติได้ หรือเว้นว่างเพื่อให้ระบบสรุปจากตารางเอง)
               </label>
               <textarea
                 rows={3}
                 value={coursesText}
                 onChange={(e) => setCoursesText(e.target.value)}
-                placeholder={"เช่น 1) ท22102 (ภาษาไทย) 2/1 [3], 2/2 [3]\n2) ท32102 (ภาษาไทย) 5/1 [2]"}
+                placeholder={"เช่น ท22102 2/1 [3], 2/2 [3]\nท32102 5/1 [2]"}
                 className="w-full px-3 py-2 rounded-lg border border-[#c9d4ec] dark:border-[#2a3a6e] bg-white dark:bg-[#0b1330] text-xs text-[#0f2150] dark:text-[#e9eefc]"
               />
             </div>

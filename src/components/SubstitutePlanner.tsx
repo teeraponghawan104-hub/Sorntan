@@ -5,7 +5,6 @@ import {
   Image as ImageIcon,
   RefreshCw,
   Table2,
-  Printer,
   Save,
   Database,
   Trash2,
@@ -13,18 +12,21 @@ import {
   Maximize2,
   X,
   UserPlus,
-  Users,
+  Copy,
+  Check,
 } from "lucide-react";
 import { DAYS, DEPARTMENT_GROUPS, TeacherRecord } from "../data/teachers";
 import {
   buildCombinedDocumentRows,
   buildCombinedTeacherHeader,
+  computeSubstituteStatistics,
   doesTeacherTeachExactClass,
   doesTeacherTeachGrade,
   doesTeacherTeachPrevPeriodExactClass,
   extractGradeLevel,
   formatClassLevelLabel,
   formatCleanSubstituteName,
+  formatLineNotificationMessage,
   formatRoomLabel,
   formatShortThaiDate,
   formatTeacherGradesSummary,
@@ -75,7 +77,7 @@ interface SubstitutePlannerProps {
   onResetAutoAssign: () => void;
   includeSupervision: boolean;
   onChangeIncludeSupervision: (inc: boolean) => void;
-  onViewTeacherTimetable: (teacherId: number) => void;
+  onViewTeacherTimetable: (teacherIdOrIds: number | number[]) => void;
   savedRecords: SavedSubstituteRecord[];
   onSaveCurrentRecord: () => Promise<void>;
   onLoadSavedRecord: (record: SavedSubstituteRecord) => void;
@@ -118,11 +120,23 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
   });
   const [isExporting, setIsExporting] = useState(false);
   const [isSavingRecord, setIsSavingRecord] = useState(false);
+  const [copiedLine, setCopiedLine] = useState(false);
   const [previewPages, setPreviewPages] = useState<string[]>([]);
   const previewDataUrl = previewPages[0] || "";
   const [fontReadyTick, setFontReadyTick] = useState<number>(0);
   const [fullscreenImageOpen, setFullscreenImageOpen] = useState<boolean>(false);
   const [, setAddingTeacherPickerOpen] = useState<boolean>(false);
+
+  // สถิติการสอนแทนสะสมของครูแต่ละท่านจากประวัติที่บันทึกไว้
+  const substituteStats = useMemo(
+    () => computeSubstituteStatistics(savedRecords, teachers),
+    [savedRecords, teachers]
+  );
+
+  const getSubCountSuffix = (teacherId: number) => {
+    const cnt = substituteStats.byTeacherId[teacherId]?.substitutedPeriods || 0;
+    return cnt > 0 ? ` · สอนแทนสะสม ${cnt} คาบ` : "";
+  };
 
   // ไม่รวมครูที่ได้รับการยกเว้นไม่ต้องจัดสอนแทนให้ (302 ครูรณสิทธิ์ ประดับศรี)
   const regularTeachers = useMemo(
@@ -211,11 +225,6 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
     return String(dt.getFullYear() + 543);
   })();
 
-  const semesterLabel =
-    academicSettings.semester === "ฤดูร้อน"
-      ? "ภาคฤดูร้อน"
-      : `ภาคเรียนที่ ${academicSettings.semester}`;
-
   // โหลดฟอนต์ราชการ THSarabunNewWeb เพียงครั้งเดียวตอนเปิดหน้า ไม่ใช้ event listener ซ้ำซ้อน
   useEffect(() => {
     if (typeof document === "undefined" || !document.fonts) return;
@@ -241,8 +250,23 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
       reason,
       rows: docRows,
       fontReadyTick,
+      plannerName: academicSettings.plannerName,
+      plannerPosition: academicSettings.plannerPosition,
+      approverName: academicSettings.approverName,
+      approverPosition: academicSettings.approverPosition,
     });
-  }, [combinedHeaderTeacher, dayIdx, selectedDate, reason, docRows, fontReadyTick]);
+  }, [
+    combinedHeaderTeacher,
+    dayIdx,
+    selectedDate,
+    reason,
+    docRows,
+    fontReadyTick,
+    academicSettings.plannerName,
+    academicSettings.plannerPosition,
+    academicSettings.approverName,
+    academicSettings.approverPosition,
+  ]);
 
   // วาดภาพตัวอย่าง A4 จาก Canvas 2D โดยป้องกันการวาดซ้ำ (Deduplicated + Debounced)
   useEffect(() => {
@@ -318,7 +342,8 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
           type: "ok",
         });
       } else {
-        setStatusMsg({ text: "บันทึก/ดาวน์โหลดไฟล์เรียบร้อยแล้ว", type: "ok" });
+        setStatusMsg({ text: "บันทึก/ดาวน์โหลดไฟล์เรียบร้อยแล้ว", type: "ok",
+        });
       }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -378,9 +403,55 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
     }
   };
 
-  const handlePrint = () => {
-    window.print();
+  const handleCopyLineNotification = async () => {
+    if (!combinedHeaderTeacher || !canExport) return;
+    const message = formatLineNotificationMessage(
+      selectedAbsentTeachers,
+      selectedDate,
+      reason,
+      docRows
+    );
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(message);
+      } else {
+        throw new Error("Clipboard API unavailable");
+      }
+      setCopiedLine(true);
+      setStatusMsg({
+        text: "คัดลอกข้อความแจ้งสอนแทนแล้ว สามารถกดวาง (Paste) ในกลุ่ม LINE โรงเรียนได้ทันที",
+        type: "ok",
+      });
+      window.setTimeout(() => setCopiedLine(false), 2500);
+    } catch {
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = message;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+        setCopiedLine(true);
+        setStatusMsg({
+          text: "คัดลอกข้อความแจ้งสอนแทนแล้ว สามารถกดวาง (Paste) ในกลุ่ม LINE โรงเรียนได้ทันที",
+          type: "ok",
+        });
+        window.setTimeout(() => setCopiedLine(false), 2500);
+      } catch {
+        setStatusMsg({
+          text: "ไม่สามารถคัดลอกข้อความอัตโนมัติได้ กรุณาลองอีกครั้ง",
+          type: "err",
+        });
+      }
+    }
   };
+
+  const hasCustomStudentTeacherSelected = useMemo(
+    () => Object.values(assignments).some((v) => v === "s"),
+    [assignments]
+  );
 
   const hasSupervisionSlots = selectedAbsentTeachers.some(
     (t) => t.id === 100 || t.id === 101
@@ -399,23 +470,28 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
       <section className="min-w-0 w-full bg-white dark:bg-[#14204a] border border-[#c9d4ec] dark:border-[#2a3a6e] rounded-xl p-4 sm:p-5 shadow-xs print:hidden space-y-4">
         {/* ส่วนหัวแผงจัดสอนแทน */}
         <div className="flex items-center justify-between gap-2 pb-3 border-b border-[#c9d4ec] dark:border-[#2a3a6e] flex-wrap">
-          <div>
-            <h2 className="text-lg sm:text-xl font-bold text-[#0f2150] dark:text-[#e9eefc]">
-              จัดครูสอนแทน
-            </h2>
-            <p className="text-xs text-[#51608a] dark:text-[#9fb0dc]">
-              {semesterLabel} ปีการศึกษา {academicSettings.academicYear}
-            </p>
-          </div>
+          <h2 className="text-lg sm:text-xl font-bold text-[#0f2150] dark:text-[#e9eefc]">
+            จัดครูสอนแทน
+          </h2>
           <div className="flex items-center gap-2">
-            {primaryTeacher && (
+            {selectedAbsentTeachers.length > 0 && (
               <button
                 type="button"
-                onClick={() => onViewTeacherTimetable(primaryTeacher.id)}
+                id="btn-view-absent-timetables"
+                onClick={() =>
+                  onViewTeacherTimetable(selectedAbsentTeachers.map((t) => t.id))
+                }
+                title={`เปิดดูตารางสอนของครูที่ลา (${selectedAbsentTeachers
+                  .map((t) => t.n)
+                  .join(", ")})`}
                 className="text-xs font-semibold px-2.5 py-1.5 rounded-md border border-[#c9d4ec] dark:border-[#2a3a6e] text-[#1b4fb8] dark:text-[#6c97ff] hover:bg-[#eaf0fa] dark:hover:bg-blue-950 flex items-center gap-1 cursor-pointer whitespace-nowrap"
               >
                 <Table2 className="w-3.5 h-3.5" />
-                <span>ดูตารางสอน</span>
+                <span>
+                  {selectedAbsentTeachers.length > 1
+                    ? `ดูตารางสอน (${selectedAbsentTeachers.length} ท่าน)`
+                    : "ดูตารางสอน"}
+                </span>
               </button>
             )}
             <button
@@ -494,13 +570,20 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                       key={t.id}
                       className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white dark:bg-[#14204a] border border-[#c9d4ec] dark:border-[#2a3a6e] text-xs font-medium text-[#0f2150] dark:text-[#e9eefc]"
                     >
-                      <span className="text-[#1b4fb8] dark:text-[#6c97ff] font-bold">
-                        {t.id}
-                      </span>
-                      <span className="font-semibold">{t.n}</span>
-                      <span className="text-[#51608a] dark:text-[#9fb0dc] text-[11px]">
-                        ({tClasses.length} คาบ)
-                      </span>
+                      <button
+                        type="button"
+                        onClick={() => onViewTeacherTimetable(t.id)}
+                        title={`คลิกเพื่อดูตารางสอนของ ${t.id} ${t.n}`}
+                        className="inline-flex items-center gap-1 hover:underline cursor-pointer text-left"
+                      >
+                        <span className="text-[#1b4fb8] dark:text-[#6c97ff] font-bold">
+                          {t.id}
+                        </span>
+                        <span className="font-semibold">{t.n}</span>
+                        <span className="text-[#51608a] dark:text-[#9fb0dc] text-[11px]">
+                          ({tClasses.length} คาบ)
+                        </span>
+                      </button>
                       {selectedAbsentTeachers.length > 1 && (
                         <button
                           type="button"
@@ -658,23 +741,25 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
             </div>
           </div>
 
-          {/* ช่องระบุชื่อ นศ.ฝึกสอน เพิ่มเติมกรณีระบุเอง */}
-          <div>
-            <label
-              htmlFor="sn"
-              className="block text-xs text-[#51608a] dark:text-[#9fb0dc] mb-1"
-            >
-              ชื่อ นศ.ฝึกสอนเพิ่มเติม (เฉพาะกรณีเลือก &ldquo;นักศึกษาฝึกสอน (ระบุชื่อเอง)&rdquo;)
-            </label>
-            <input
-              type="text"
-              id="sn"
-              value={studentTeacherName}
-              onChange={(e) => onChangeStudentTeacherName(e.target.value)}
-              placeholder="พิมพ์ชื่อหากต้องการระบุเอง"
-              className="w-full px-2.5 py-1 text-xs rounded-md border border-[#c9d4ec] dark:border-[#2a3a6e] bg-white dark:bg-[#0b1330] text-[#0f2150] dark:text-[#e9eefc] focus:outline-2 focus:outline-[#f2c230]"
-            />
-          </div>
+          {/* ช่องระบุชื่อ นศ.ฝึกสอน เพิ่มเติม (แสดงเฉพาะเมื่อมีการเลือกตัวเลือก "นักศึกษาฝึกสอน (ระบุชื่อเอง)" ในคาบเรียน) */}
+          {hasCustomStudentTeacherSelected && (
+            <div>
+              <label
+                htmlFor="sn"
+                className="block text-xs font-bold text-[#0f2150] dark:text-[#e9eefc] mb-1"
+              >
+                ระบุชื่อนักศึกษาฝึกสอน
+              </label>
+              <input
+                type="text"
+                id="sn"
+                value={studentTeacherName}
+                onChange={(e) => onChangeStudentTeacherName(e.target.value)}
+                placeholder="พิมพ์ชื่อ-สกุล นักศึกษาฝึกสอน"
+                className="w-full px-2.5 py-1.5 text-xs rounded-md border border-[#c9d4ec] dark:border-[#2a3a6e] bg-white dark:bg-[#0b1330] text-[#0f2150] dark:text-[#e9eefc] focus:outline-2 focus:outline-[#f2c230]"
+              />
+            </div>
+          )}
 
           {/* ตัวเลือกเสริมสำหรับฝ่ายบริหารที่มีคาบนิเทศสอน */}
           {hasSupervisionSlots && (
@@ -715,7 +800,7 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
 
           {selectedAbsentTeachers.length === 0 ? (
             <p className="text-[#51608a] dark:text-[#9fb0dc] text-sm">
-              เลือกครูที่ไม่สามารถสอนได้ ระบบจะค้นหาคาบสอนและจัดครูสอนแทนโดยคำนึงถึงครูคาบต่อเนื่องและระดับชั้นเดียวกันเป็นหลัก
+              กรุณาเลือกครูที่ลาในขั้นตอนที่ 1
             </p>
           ) : !selectedDate ? (
             <p className="text-[#51608a] dark:text-[#9fb0dc] text-sm">
@@ -732,9 +817,6 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
               <p className="text-[#0f2150] dark:text-[#e9eefc] font-semibold text-sm">
                 <b>{selectedAbsentTeachers.map((t) => t.n).join(", ")}</b> ไม่มีคาบสอนวิชาปกติในวัน
                 {DAYS[dayIdx]}
-              </p>
-              <p className="text-xs text-[#51608a] dark:text-[#9fb0dc] mt-1">
-                กดปุ่มวันจันทร์–ศุกร์ในขั้นตอนที่ 2 เพื่อดูคาบสอนในวันอื่นได้ทันที
               </p>
             </div>
           ) : (
@@ -904,7 +986,7 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                             );
                             return (
                               <option key={t.id} value={`t${t.id}`}>
-                                {t.id} {t.n} (สอนต่อเนื่อง ม.{slot.cls} จากคาบ {contInfo.prevPeriodNumber} วิชา{contInfo.prevSubjectName} · {t.pdfGroup})
+                                {t.id} {t.n} (สอนต่อเนื่อง ม.{slot.cls} จากคาบ {contInfo.prevPeriodNumber} วิชา{contInfo.prevSubjectName} · {t.pdfGroup}{getSubCountSuffix(t.id)})
                               </option>
                             );
                           })}
@@ -918,7 +1000,7 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                             const exact = doesTeacherTeachExactClass(t, slot.cls);
                             return (
                               <option key={t.id} value={`t${t.id}`}>
-                                {t.id} {t.n} (สอน {exact ? `ม.${slot.cls}` : gradeLabel} · กลุ่มสาระ{t.pdfGroup})
+                                {t.id} {t.n} (สอน {exact ? `ม.${slot.cls}` : gradeLabel} · กลุ่มสาระ{t.pdfGroup}{getSubCountSuffix(t.id)})
                               </option>
                             );
                           })}
@@ -932,7 +1014,7 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                             const exact = doesTeacherTeachExactClass(t, slot.cls);
                             return (
                               <option key={t.id} value={`t${t.id}`}>
-                                {t.id} {t.n} (สอน {exact ? `ม.${slot.cls}` : gradeLabel} · {t.pdfGroup})
+                                {t.id} {t.n} (สอน {exact ? `ม.${slot.cls}` : gradeLabel} · {t.pdfGroup}{getSubCountSuffix(t.id)})
                               </option>
                             );
                           })}
@@ -944,7 +1026,7 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                         >
                           {otherGradeSameGroupRegular.map((t) => (
                             <option key={t.id} value={`t${t.id}`}>
-                              {t.id} {t.n} (กลุ่มสาระ{t.pdfGroup} · สอน {formatTeacherGradesSummary(t)})
+                              {t.id} {t.n} (กลุ่มสาระ{t.pdfGroup} · สอน {formatTeacherGradesSummary(t)}{getSubCountSuffix(t.id)})
                             </option>
                           ))}
                         </optgroup>
@@ -970,7 +1052,7 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                                   : stSameGrade
                                     ? `สอน ${stExact ? `ม.${slot.cls}` : gradeLabel} · `
                                     : `สอน ${formatTeacherGradesSummary(t)} · `}
-                                {t.pdfGroup})
+                                {t.pdfGroup}{getSubCountSuffix(t.id)})
                               </option>
                             );
                           })}
@@ -982,7 +1064,7 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                         >
                           {otherGradeOtherGroupRegular.map((t) => (
                             <option key={t.id} value={`t${t.id}`}>
-                              {t.id} {t.n} ({t.pdfGroup} · สอน {formatTeacherGradesSummary(t)})
+                              {t.id} {t.n} ({t.pdfGroup} · สอน {formatTeacherGradesSummary(t)}{getSubCountSuffix(t.id)})
                             </option>
                           ))}
                         </optgroup>
@@ -1002,16 +1084,32 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
             </div>
           )}
 
-          {/* ปุ่มบันทึกประวัติลงฐานข้อมูล */}
-          <div className="pt-2 border-t border-[#c9d4ec] dark:border-[#2a3a6e] flex items-center justify-between gap-2">
-            <span className="text-xs text-[#51608a] dark:text-[#9fb0dc]">
-              บันทึกเก็บไว้ดูย้อนหลังหรือเปิดแก้ไขภายหลัง
-            </span>
+          {/* ปุ่มคัดลอกแจ้ง LINE และปุ่มบันทึกประวัติลงฐานข้อมูล */}
+          <div className="pt-2 border-t border-[#c9d4ec] dark:border-[#2a3a6e] grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              id="btn-copy-line"
+              disabled={!canExport}
+              onClick={handleCopyLineNotification}
+              className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-[#0b7a4b] dark:border-[#4fd39a] text-[#0b7a4b] dark:text-[#4fd39a] hover:bg-emerald-50 dark:hover:bg-emerald-950/50 disabled:opacity-40 font-bold text-xs sm:text-sm transition-colors cursor-pointer whitespace-nowrap"
+            >
+              {copiedLine ? (
+                <>
+                  <Check className="w-4 h-4 shrink-0" />
+                  <span>คัดลอกแล้ว!</span>
+                </>
+              ) : (
+                <>
+                  <Copy className="w-4 h-4 shrink-0" />
+                  <span>คัดลอกแจ้ง LINE</span>
+                </>
+              )}
+            </button>
             <button
               type="button"
               disabled={!canExport || isSavingRecord}
               onClick={handleSaveToDatabase}
-              className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-[#0b7a4b] hover:bg-[#085c38] disabled:opacity-40 text-white font-bold text-xs sm:text-sm transition-colors cursor-pointer shadow-xs whitespace-nowrap"
+              className="flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-lg bg-[#0b7a4b] hover:bg-[#085c38] disabled:opacity-40 text-white font-bold text-xs sm:text-sm transition-colors cursor-pointer shadow-xs whitespace-nowrap"
             >
               <Save className="w-4 h-4 shrink-0" />
               <span>{isSavingRecord ? "กำลังบันทึก..." : "บันทึกประวัติ"}</span>
@@ -1079,22 +1177,27 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
       {/* แผงแสดงตัวอย่างเอกสารใบสอนแทน (A4) ด้านขวา */}
       <section className="min-w-0 w-full bg-white dark:bg-[#14204a] border border-[#c9d4ec] dark:border-[#2a3a6e] rounded-xl p-3 sm:p-5 shadow-xs">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 mb-3 print:hidden">
-          <div>
-            <div className="flex items-center gap-2 flex-wrap">
-              <h2 className="text-base sm:text-lg font-bold text-[#0f2150] dark:text-[#e9eefc]">
-                ตัวอย่างแบบบันทึกการจัดสอนแทน (A4 แนวนอน)
-              </h2>
-              {selectedAbsentTeachers.length > 1 && (
-                <span className="text-xs px-2 py-0.5 rounded-md bg-blue-100 dark:bg-blue-950 text-[#1b4fb8] dark:text-[#6c97ff] font-bold">
-                  รวม {selectedAbsentTeachers.length} ท่าน
-                </span>
-              )}
-            </div>
-            <p className="text-xs text-[#51608a] dark:text-[#9fb0dc]">
-              กดดาวน์โหลดเป็นไฟล์ Word, PDF, รูปภาพ หรือสั่งพิมพ์ได้ทันที
-            </p>
+          <div className="flex items-center gap-2 flex-wrap min-w-0">
+            <h2 className="text-base sm:text-lg font-bold text-[#0f2150] dark:text-[#e9eefc]">
+              ตัวอย่างแบบบันทึกการจัดสอนแทน
+            </h2>
+            {selectedAbsentTeachers.length > 1 && (
+              <span className="text-xs px-2 py-0.5 rounded-md bg-blue-100 dark:bg-blue-950 text-[#1b4fb8] dark:text-[#6c97ff] font-bold">
+                รวม {selectedAbsentTeachers.length} ท่าน
+              </span>
+            )}
+            {previewDataUrl && (
+              <button
+                type="button"
+                onClick={() => setFullscreenImageOpen(true)}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-[#eaf0fa] dark:bg-[#0b1330] text-[#1b4fb8] dark:text-[#6c97ff] hover:bg-blue-200 dark:hover:bg-blue-950 font-semibold cursor-pointer whitespace-nowrap text-xs"
+              >
+                <Maximize2 className="w-3 h-3" />
+                <span>ขยายเต็มจอ</span>
+              </button>
+            )}
           </div>
-          <div className="grid grid-cols-2 sm:flex sm:flex-wrap items-center gap-1.5">
+          <div className="grid grid-cols-3 sm:flex items-center gap-1.5 shrink-0">
             <button
               type="button"
               id="bw"
@@ -1125,32 +1228,8 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
               <ImageIcon className="w-4 h-4 shrink-0" />
               <span>รูปภาพ</span>
             </button>
-            <button
-              type="button"
-              disabled={!canExport || isExporting}
-              onClick={handlePrint}
-              className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-[#c9d4ec] dark:border-[#2a3a6e] text-[#0f2150] dark:text-[#e9eefc] hover:bg-slate-100 dark:hover:bg-blue-950 disabled:opacity-40 disabled:cursor-not-allowed text-xs sm:text-sm font-semibold transition-colors cursor-pointer whitespace-nowrap"
-            >
-              <Printer className="w-4 h-4 shrink-0" />
-              <span>พิมพ์</span>
-            </button>
           </div>
         </div>
-
-        {/* แถบย่อสำหรับ iOS / ขยายเต็มจอ */}
-        {previewDataUrl && (
-          <div className="mb-2.5 flex items-center justify-between gap-2 px-3 py-1.5 rounded-lg bg-[#f8faff] dark:bg-[#0b1330]/60 border border-[#c9d4ec] dark:border-[#2a3a6e] text-xs text-[#51608a] dark:text-[#9fb0dc] print:hidden">
-            <span>บนมือถือ / iPad: สามารถกดปุ่มรูปภาพ หรือกดค้างที่ตัวใบงานเพื่อบันทึกรูปได้ทันที</span>
-            <button
-              type="button"
-              onClick={() => setFullscreenImageOpen(true)}
-              className="flex items-center gap-1 px-2.5 py-1 rounded-md bg-[#1b4fb8] text-white font-semibold cursor-pointer whitespace-nowrap text-xs shrink-0"
-            >
-              <Maximize2 className="w-3 h-3" />
-              <span>ขยายเต็มจอ</span>
-            </button>
-          </div>
-        )}
 
         {statusMsg.text && (
           <div
@@ -1212,21 +1291,16 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                             <span>
                               หน้า {pIdx + 1} จาก {previewPages.length}
                             </span>
-                            <div className="flex items-center gap-2">
-                              <button
-                                type="button"
-                                disabled={isExporting}
-                                onClick={() => handleDownloadSinglePage(pIdx)}
-                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-white dark:bg-[#14204a] hover:bg-blue-50 dark:hover:bg-blue-900 border border-[#c9d4ec] dark:border-[#2a3a6e] text-[#1b4fb8] dark:text-[#6c97ff] text-xs font-medium cursor-pointer shadow-2xs transition-colors"
-                                title={`ดาวน์โหลดเฉพาะรูปภาพหน้า ${pIdx + 1}`}
-                              >
-                                <ImageIcon className="w-3 h-3 shrink-0" />
-                                <span>โหลดรูปหน้า {pIdx + 1}</span>
-                              </button>
-                              <span className="text-[11px] text-slate-500 dark:text-slate-400 font-normal hidden sm:inline">
-                                A4 แนวนอน · ฟอนต์ TH Sarabun PSK ขนาด 16
-                              </span>
-                            </div>
+                            <button
+                              type="button"
+                              disabled={isExporting}
+                              onClick={() => handleDownloadSinglePage(pIdx)}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-white dark:bg-[#14204a] hover:bg-blue-50 dark:hover:bg-blue-900 border border-[#c9d4ec] dark:border-[#2a3a6e] text-[#1b4fb8] dark:text-[#6c97ff] text-xs font-medium cursor-pointer shadow-2xs transition-colors"
+                              title={`ดาวน์โหลดเฉพาะรูปภาพหน้า ${pIdx + 1}`}
+                            >
+                              <ImageIcon className="w-3 h-3 shrink-0" />
+                              <span>โหลดรูปหน้า {pIdx + 1}</span>
+                            </button>
                           </div>
                         )}
                         <img
@@ -1354,13 +1428,13 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                   <div className="mt-10 flex items-stretch justify-around gap-6">
                     <div className="border-2 border-black px-6 py-3 text-center">
                       <p>ลงชื่อ.................................ผู้จัดสอนแทน</p>
-                      <p className="mt-1">(นายธีระพงษ์ หาวัน)</p>
-                      <p className="mt-1">งานการจัดการเรียนการสอน</p>
+                      <p className="mt-1">({academicSettings.plannerName})</p>
+                      <p className="mt-1">{academicSettings.plannerPosition}</p>
                     </div>
                     <div className="border-2 border-black px-6 py-3 text-center">
                       <p>ลงชื่อ.................................หัวหน้ากลุ่มบริหารวิชาการ</p>
-                      <p className="mt-1">(นายสุทธิศักดิ์ เกตษา)</p>
-                      <p className="mt-1">ผู้ช่วยผู้อำนวยการโรงเรียนวรคุณอุปถัมภ์</p>
+                      <p className="mt-1">({academicSettings.approverName})</p>
+                      <p className="mt-1">{academicSettings.approverPosition}</p>
                     </div>
                   </div>
                 </div>
@@ -1370,7 +1444,7 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
         </div>
       </section>
 
-      {/* หน้าต่างขยายดูใบสอนแทนเต็มจอสำหรับ iOS / มือถือ (กดค้างที่รูปเพื่อบันทึกภาพได้ทันที) */}
+      {/* หน้าต่างขยายดูใบสอนแทนเต็มจอ */}
       {fullscreenImageOpen && (previewPages.length > 0 || previewDataUrl) && (
         <div
           role="dialog"
@@ -1380,8 +1454,8 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
           <div className="w-full max-w-[1123px] flex items-center justify-between gap-2 mb-3 text-white sticky top-0 z-10 bg-black/70 backdrop-blur-xs py-2 px-3 rounded-lg">
             <span className="text-xs sm:text-sm font-semibold">
               {previewPages.length > 1
-                ? `แสดงครบทั้ง ${previewPages.length} หน้า · กดค้างที่รูปภาพเพื่อบันทึกบนมือถือ`
-                : "กดค้างที่รูปภาพใบสอนแทนเพื่อเลือก \"บันทึกรูปภาพ (Save to Photos)\" บน iPhone"}
+                ? `แบบบันทึกการจัดสอนแทน (${previewPages.length} หน้า)`
+                : "แบบบันทึกการจัดสอนแทน"}
             </span>
             <button
               type="button"
