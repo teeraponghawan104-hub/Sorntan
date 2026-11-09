@@ -1026,6 +1026,111 @@ export function autoAssignCombinedSubstitutes(
   return assignments;
 }
 
+/**
+ * ปรับปรุงผู้สอนแทนเมื่อมีการเพิ่ม/ลบครูที่ลา หรือแก้ไขตารางสอน:
+ * - คงค่าผู้สอนแทนที่เลือกไว้เดิม (currentAssignments) หากครูผู้สอนแทนท่านนั้นยังว่างในคาบเรียนและไม่ชนกับคาบอื่น
+ * - คำนวณหาผู้สอนแทนอัตโนมัติเฉพาะคาบที่เพิ่มใหม่ หรือคาบที่ผู้สอนแทนเดิมติดสอน/ไม่ว่างหลังแก้ไขตารางสอน
+ */
+export function reconcileCombinedSubstitutes(
+  teacherIds: (string | number)[],
+  dateStr: string,
+  currentAssignments: Record<string, string>,
+  includeSupervision = false
+): Record<string, string> {
+  const allAbsentIds = Array.from(
+    new Set(
+      teacherIds
+        .map((id) => Number(id))
+        .filter((id) => !Number.isNaN(id) && id > 0 && !isTeacherExemptFromNeedingSubstitute(id))
+    )
+  );
+  const absentIdSet = new Set(allAbsentIds);
+  const combinedSlots = getCombinedTeacherClasses(allAbsentIds, dateStr, includeSupervision);
+  const assignments: Record<string, string> = {};
+  if (combinedSlots.length === 0) return assignments;
+
+  const assignedCount: Record<number, number> = {};
+  const usedInPeriod: Record<number, Set<number>> = {};
+  const dayIdx = getDayIndex(dateStr);
+
+  // รอบที่ 1: คงค่าผู้สอนแทนเดิมที่ยังว่างอยู่และไม่ชนกันในคาบเดียวกัน
+  combinedSlots.forEach((slot) => {
+    const existingVal =
+      currentAssignments[slot.slotKey] ||
+      (allAbsentIds.length === 1 ? currentAssignments[String(slot.p)] : "");
+    if (!existingVal) return;
+
+    if (existingVal === "st") {
+      assignments[slot.slotKey] = existingVal;
+      if (allAbsentIds.length === 1) assignments[String(slot.p)] = existingVal;
+      return;
+    }
+
+    if (existingVal.startsWith("t")) {
+      const subId = Number(existingVal.slice(1));
+      if (!subId || absentIdSet.has(subId)) return;
+      const busySet = usedInPeriod[slot.p] || new Set<number>();
+      if (busySet.has(subId)) return;
+
+      const subTeacher = getTeacherById(subId);
+      if (!subTeacher || isExcludedFromSubstituting(subTeacher)) {
+        return;
+      }
+      if (dayIdx >= 0) {
+        const cell = subTeacher.d?.[dayIdx]?.[slot.p] || "";
+        if (cell.trim() !== "") {
+          return; // ครูผู้สอนแทนท่านนี้มีคาบสอนในตารางใหม่แล้ว ให้คำนวณหาคนใหม่แทนอัตโนมัติ
+        }
+      }
+
+      assignments[slot.slotKey] = existingVal;
+      if (allAbsentIds.length === 1) assignments[String(slot.p)] = existingVal;
+      assignedCount[subId] = (assignedCount[subId] || 0) + 1;
+      if (!usedInPeriod[slot.p]) usedInPeriod[slot.p] = new Set<number>();
+      usedInPeriod[slot.p].add(subId);
+    }
+  });
+
+  // รอบที่ 2: จัดผู้สอนแทนอัตโนมัติสำหรับคาบที่ยังไม่มีผู้สอนแทน หรือคาบที่ผู้สอนแทนเดิมติดคาบสอนหลังแก้ไขตาราง
+  combinedSlots.forEach((slot) => {
+    if (assignments[slot.slotKey]) return;
+
+    const busySet = usedInPeriod[slot.p] || new Set<number>();
+    const allFree = getCandidateTeachers(
+      slot.absentTeacherId,
+      dateStr,
+      slot.p,
+      [...allAbsentIds, ...Array.from(busySet)],
+      slot.cls
+    );
+
+    const chosen = pickBestSubstituteForSlot(
+      allFree,
+      slot.cls,
+      slot.absentTeacherGroup,
+      slot.absentTeacherPdfGroup,
+      assignedCount,
+      dateStr,
+      slot.p
+    );
+
+    if (chosen) {
+      const val = `t${chosen.id}`;
+      assignments[slot.slotKey] = val;
+      if (allAbsentIds.length === 1) assignments[String(slot.p)] = val;
+      assignedCount[chosen.id] = (assignedCount[chosen.id] || 0) + 1;
+      if (!usedInPeriod[slot.p]) usedInPeriod[slot.p] = new Set<number>();
+      usedInPeriod[slot.p].add(chosen.id);
+      return;
+    }
+
+    assignments[slot.slotKey] = "s";
+    if (allAbsentIds.length === 1) assignments[String(slot.p)] = "s";
+  });
+
+  return assignments;
+}
+
 export function getSlotAssignment(
   assignments: Record<string | number, string>,
   absentTeacherId: number,
@@ -2090,6 +2195,17 @@ export function renameCourseCodesInTeachers(
     const newCoursesSummary = Array.isArray(teacher.coursesSummary)
       ? teacher.coursesSummary.map((line) => {
           const trimmed = String(line || "").trim();
+          const numberedMatch = trimmed.match(/^(\d+\)\s*)([^\s(]+)(\s+.*)$/);
+          if (numberedMatch) {
+            const prefix = numberedMatch[1];
+            const codeToken = numberedMatch[2];
+            const rest = numberedMatch[3];
+            if (cleanRenames[codeToken]) {
+              teacherModified = true;
+              return `${prefix}${cleanRenames[codeToken]}${rest}`;
+            }
+            return line;
+          }
           const tokens = trimmed.split(/\s+/);
           const firstToken = tokens[0] || "";
           if (firstToken && cleanRenames[firstToken]) {
@@ -2100,6 +2216,17 @@ export function renameCourseCodesInTeachers(
         })
       : [];
 
+    let newOtherSummary = String(teacher.otherSummary || "");
+    Object.entries(cleanRenames).forEach(([oldC, newC]) => {
+      if (newOtherSummary.includes(oldC)) {
+        const updatedOther = newOtherSummary.split(oldC).join(newC);
+        if (updatedOther !== newOtherSummary) {
+          newOtherSummary = updatedOther;
+          teacherModified = true;
+        }
+      }
+    });
+
     if (!teacherModified) {
       return teacher;
     }
@@ -2109,6 +2236,7 @@ export function renameCourseCodesInTeachers(
       ...teacher,
       s: newDaysStr,
       coursesSummary: newCoursesSummary,
+      otherSummary: newOtherSummary,
       d: newDaysStr.split("|").map((day) => day.split(",")),
     };
   });
@@ -2154,13 +2282,139 @@ export function buildSemesterCourseCodeShiftMap(
 }
 
 /**
+ * เชื่อมโยงบรรทัดสรุปวิชา (coursesSummary) ให้แสดงชื่อวิชาในวงเล็บตรงกับฐานข้อมูลรหัสวิชา (subjectMappings) เสมอ
+ */
+export function formatLinkedCourseSummaryLine(
+  line: string,
+  fallbackGroup?: string,
+  teacherId?: string | number
+): string {
+  const trimmed = String(line || "").trim();
+  if (!trimmed) return "";
+
+  // กรณีมีวงเล็บชื่อวิชาอยู่แล้ว เช่น "1) ว21102 (วิทยาศาสตร์) ม.1/1 [3], ม.1/2 [3]"
+  const withParenMatch = trimmed.match(/^(\d+\)\s*)?([^\s()]+)\s*\(([^)]+)\)\s*(.+)$/);
+  if (withParenMatch) {
+    const prefix = withParenMatch[1] || "";
+    const code = withParenMatch[2].trim();
+    const existingName = withParenMatch[3].trim();
+    const rest = withParenMatch[4].trim();
+    const customMapped =
+      CUSTOM_SUBJECT_MAPPINGS[code] ||
+      CUSTOM_SUBJECT_MAPPINGS[code.split("-")[0]];
+    const finalName = customMapped || existingName;
+    return `${prefix}${code} (${finalName}) ${rest}`;
+  }
+
+  // กรณีไม่มีวงเล็บชื่อวิชา เช่น "1) ว21102 1/1 [3], 1/2 [3]"
+  const noParenMatch = trimmed.match(/^(\d+\)\s*)?([^\s()]+)\s+(.+)$/);
+  if (noParenMatch) {
+    const prefix = noParenMatch[1] || "";
+    const code = noParenMatch[2].trim();
+    const rest = noParenMatch[3].trim();
+    if (code && !code.startsWith("[")) {
+      const resolvedName = getSubjectNameFromCourse(code, fallbackGroup, teacherId);
+      if (resolvedName && resolvedName !== "-" && resolvedName !== code) {
+        return `${prefix}${code} (${resolvedName}) ${rest}`;
+      }
+    }
+  }
+
+  return trimmed;
+}
+
+/**
+ * ดึงคู่ รหัสวิชา -> ชื่อวิชา จากบรรทัดสรุปรายวิชาที่ผู้ใช้พิมพ์ในวงเล็บ เช่น "1) ว21102 (วิทยาศาสตร์) 1/1 [3]"
+ */
+export function extractSubjectNamesFromCoursesSummary(
+  lines: string[]
+): Record<string, string> {
+  const extracted: Record<string, string> = {};
+  (lines || []).forEach((rawLine) => {
+    const trimmed = String(rawLine || "").trim();
+    const match = trimmed.match(/^(?:\d+\)\s*)?([^\s()]+)\s*\(([^)]+)\)/);
+    if (match) {
+      const code = match[1].trim();
+      const subj = match[2].trim();
+      if (code && subj && !/^\d+$/.test(subj)) {
+        extracted[code] = subj;
+      }
+    }
+  });
+  return extracted;
+}
+
+/**
+ * ซิงก์ชื่อวิชาใน coursesSummary ของครูทุกคนให้ตรงกับตารางรหัสวิชา (subjectMappings)
+ */
+export function syncCoursesSummaryWithSubjectMappings(
+  teachers: TeacherRecord[],
+  mappings: Record<string, string>
+): {
+  updatedTeachers: TeacherRecord[];
+  changedCount: number;
+} {
+  let changedCount = 0;
+  const updatedTeachers = teachers.map((t) => {
+    if (!Array.isArray(t.coursesSummary) || t.coursesSummary.length === 0) {
+      return t;
+    }
+    let modified = false;
+    const nextSummary = t.coursesSummary.map((line) => {
+      const trimmed = String(line || "").trim();
+      const withParenMatch = trimmed.match(/^(\d+\)\s*)?([^\s()]+)\s*\(([^)]+)\)\s*(.+)$/);
+      if (withParenMatch) {
+        const prefix = withParenMatch[1] || "";
+        const code = withParenMatch[2].trim();
+        const existingName = withParenMatch[3].trim();
+        const rest = withParenMatch[4].trim();
+        const mapped = mappings[code] || mappings[code.split("-")[0]];
+        if (mapped && mapped !== existingName) {
+          modified = true;
+          return `${prefix}${code} (${mapped}) ${rest}`;
+        }
+        return line;
+      }
+      const noParenMatch = trimmed.match(/^(\d+\)\s*)?([^\s()]+)\s+(.+)$/);
+      if (noParenMatch) {
+        const prefix = noParenMatch[1] || "";
+        const code = noParenMatch[2].trim();
+        const rest = noParenMatch[3].trim();
+        const mapped =
+          mappings[code] ||
+          mappings[code.split("-")[0]] ||
+          getSubjectNameFromCourse(code, t.pdfGroup || t.g, t.id);
+        if (mapped && mapped !== "-" && mapped !== code) {
+          modified = true;
+          return `${prefix}${code} (${mapped}) ${rest}`;
+        }
+      }
+      return line;
+    });
+
+    if (!modified) return t;
+    changedCount++;
+    return {
+      ...t,
+      coursesSummary: nextSummary,
+    };
+  });
+
+  return { updatedTeachers, changedCount };
+}
+
+/**
  * คำนวณจำนวนชั่วโมงรวมและสรุปรายวิชาที่สอนอัตโนมัติจากตารางสอน 5 วัน x 7 คาบ
+ * พร้อมเชื่อมโยงชื่อวิชาในวงเล็บ (ชื่อวิชา) จากฐานข้อมูลรหัสวิชาหรือจากข้อความสรุปเดิมโดยอัตโนมัติ
  */
 export function summarizeTeacherGrid(
   grid: string[][],
   defaultRoom = "-",
   otherSummary = "",
-  isStudentTeacher = false
+  isStudentTeacher = false,
+  fallbackGroup = "",
+  teacherId?: string | number,
+  existingCoursesSummary: string[] = []
 ): {
   totalHours: number;
   coursesSummary: string[];
@@ -2187,11 +2441,40 @@ export function summarizeTeacherGrid(
     }
   }
 
-  const coursesSummary = Object.entries(courseClassCounts).map(([code, clsMap], idx) => {
-    const clsParts = Object.entries(clsMap)
-      .map(([cls, count]) => `${cls} [${count}]`)
+  const existingSubjectByCode = extractSubjectNamesFromCoursesSummary(existingCoursesSummary);
+  const existingUsesM = existingCoursesSummary.some((line) => /ม\.\d+\/\d+/.test(line));
+
+  const sortedCodes = Object.keys(courseClassCounts).sort((a, b) =>
+    a.localeCompare(b, "th")
+  );
+
+  const coursesSummary = sortedCodes.map((code, idx) => {
+    const clsMap = courseClassCounts[code];
+    const sortedClasses = Object.entries(clsMap).sort(([clsA], [clsB]) =>
+      clsA.localeCompare(clsB, "th", { numeric: true })
+    );
+    const clsParts = sortedClasses
+      .map(([cls, count]) => {
+        const formattedCls =
+          existingUsesM && /^\d+\/\d+$/.test(cls) ? `ม.${cls}` : cls;
+        return `${formattedCls} [${count}]`;
+      })
       .join(", ");
-    return `${idx + 1}) ${code} ${clsParts}`;
+
+    const customMapped =
+      CUSTOM_SUBJECT_MAPPINGS[code] ||
+      CUSTOM_SUBJECT_MAPPINGS[code.split("-")[0]];
+    const subjectName =
+      customMapped ||
+      existingSubjectByCode[code] ||
+      getSubjectNameFromCourse(code, fallbackGroup, teacherId);
+
+    const subjectPart =
+      subjectName && subjectName !== "-" && subjectName !== code
+        ? ` (${subjectName})`
+        : "";
+
+    return `${idx + 1}) ${code}${subjectPart} ${clsParts}`;
   });
 
   const plcMatch = (otherSummary || "").match(/PLC\s*\[(\d+)\]/i);
@@ -2364,7 +2647,27 @@ export function parseTeachersFromCsv(
 
     grid[dayIdx] = periodCells;
 
-    const { totalHours, coursesSummary } = summarizeTeacherGrid(grid, room);
+    const resolvedIsStudent =
+      typeStr.includes("นักศึกษา") || typeStr.includes("ฝึกสอน")
+        ? true
+        : typeStr.includes("ประจำการ")
+        ? false
+        : Boolean(existing?.isStudentTeacher);
+    const resolvedOtherSummary =
+      existing?.otherSummary ||
+      (resolvedIsStudent
+        ? "กิจกรรม ลูกเสือ [1] ชุมนุม [1] ฐาน ศก. [1] ต้านทุจริต [1] แนะแนว [1]"
+        : "PLC [5] กิจกรรม [1] ชุมนุม [1] ฐาน ศก. [1] แนะแนว [1] โฮมรูม ต.ทุจริต [1]");
+
+    const { totalHours, coursesSummary } = summarizeTeacherGrid(
+      grid,
+      room,
+      resolvedOtherSummary,
+      resolvedIsStudent,
+      pdfGroup || group,
+      id,
+      existing?.coursesSummary || []
+    );
     const s = grid.map((r) => r.join(",")).join("|");
 
     byId.set(id, {
@@ -2376,16 +2679,9 @@ export function parseTeachersFromCsv(
       totalHours,
       coursesSummary:
         coursesSummary.length > 0 ? coursesSummary : existing?.coursesSummary || [],
-      otherSummary:
-        existing?.otherSummary ||
-        "PLC [5] กิจกรรม [1] ชุมนุม [1] ฐาน ศก. [1] แนะแนว [1] โฮมรูม ต.ทุจริต [1]",
+      otherSummary: resolvedOtherSummary,
       s,
-      isStudentTeacher:
-        typeStr.includes("นักศึกษา") || typeStr.includes("ฝึกสอน")
-          ? true
-          : typeStr.includes("ประจำการ")
-          ? false
-          : Boolean(existing?.isStudentTeacher),
+      isStudentTeacher: resolvedIsStudent,
       d: grid,
     });
     touchedIds.add(id);

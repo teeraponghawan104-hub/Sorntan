@@ -6,7 +6,10 @@ import {
   PERIOD_TIMES,
   TeacherRecord,
 } from "../data/teachers";
-import { parseScheduleCell } from "../utils/scheduler";
+import {
+  formatLinkedCourseSummaryLine,
+  parseScheduleCell,
+} from "../utils/scheduler";
 import { AcademicSettings, DEFAULT_ACADEMIC_SETTINGS } from "../utils/databaseStore";
 
 interface MasterTimetableViewProps {
@@ -17,7 +20,10 @@ interface MasterTimetableViewProps {
   onBackToPlanner?: () => void;
   onSelectTeacherForSubstitute: (teacherId: number) => void;
   onOpenAddTeacher: () => void;
-  onOpenEditTeacher: (teacher: TeacherRecord) => void;
+  onOpenEditTeacher: (
+    teacher: TeacherRecord,
+    focusCell?: { day: number; period: number }
+  ) => void;
 }
 
 export const MasterTimetableView: React.FC<MasterTimetableViewProps> = ({
@@ -526,7 +532,11 @@ export const MasterTimetableView: React.FC<MasterTimetableViewProps> = ({
                           {dayRow.slice(0, 4).map((cell, pIdx) => (
                             <td
                               key={pIdx}
-                              className="border border-slate-700 dark:border-[#3b4e87] py-1.5 px-1 align-middle h-[58px]"
+                              onClick={() =>
+                                onOpenEditTeacher(teacher, { day: dayIdx, period: pIdx })
+                              }
+                              title={`คลิกเพื่อแก้ไข วัน${dayName} คาบที่ ${pIdx + 1}`}
+                              className="border border-slate-700 dark:border-[#3b4e87] py-1.5 px-1 align-middle h-[58px] cursor-pointer hover:bg-amber-50/70 dark:hover:bg-blue-900/40 transition-colors"
                             >
                               {renderCellContent(teacher, cell)}
                             </td>
@@ -535,7 +545,14 @@ export const MasterTimetableView: React.FC<MasterTimetableViewProps> = ({
                           {dayRow.slice(4, 7).map((cell, pIdx) => (
                             <td
                               key={pIdx + 4}
-                              className="border border-slate-700 dark:border-[#3b4e87] py-1.5 px-1 align-middle h-[58px]"
+                              onClick={() =>
+                                onOpenEditTeacher(teacher, {
+                                  day: dayIdx,
+                                  period: pIdx + 4,
+                                })
+                              }
+                              title={`คลิกเพื่อแก้ไข วัน${dayName} คาบที่ ${pIdx + 5}`}
+                              className="border border-slate-700 dark:border-[#3b4e87] py-1.5 px-1 align-middle h-[58px] cursor-pointer hover:bg-amber-50/70 dark:hover:bg-blue-900/40 transition-colors"
                             >
                               {renderCellContent(teacher, cell)}
                             </td>
@@ -547,7 +564,7 @@ export const MasterTimetableView: React.FC<MasterTimetableViewProps> = ({
                 </table>
               </div>
 
-              {/* สรุปวิชาที่สอนและกิจกรรมด้านล่างตารางตามแบบใน PDF */}
+              {/* สรุปวิชาที่สอนและกิจกรรมด้านล่างตารางตามแบบใน PDF (ลิงก์ชื่อวิชาอัตโนมัติกับฐานข้อมูลรหัสวิชา) */}
               <div className="mt-3 pt-2.5 text-xs text-[#0f2150] dark:text-[#e9eefc]">
                 <div className="flex items-center justify-between font-bold border-b border-[#c9d4ec] dark:border-[#2a3a6e] pb-1 mb-1.5">
                   <span>วิชาที่สอน / ชั้น [รวม]</span>
@@ -555,7 +572,13 @@ export const MasterTimetableView: React.FC<MasterTimetableViewProps> = ({
                 </div>
                 <div className="space-y-0.5 text-[#51608a] dark:text-[#9fb0dc]">
                   {teacher.coursesSummary.map((line, i) => (
-                    <div key={i}>{line}</div>
+                    <div key={i}>
+                      {formatLinkedCourseSummaryLine(
+                        line,
+                        teacher.pdfGroup || teacher.g,
+                        teacher.id
+                      )}
+                    </div>
                   ))}
                   <div className="pt-0.5 text-[#0f2150] dark:text-[#e9eefc] font-medium">
                     อื่นๆ {teacher.otherSummary}

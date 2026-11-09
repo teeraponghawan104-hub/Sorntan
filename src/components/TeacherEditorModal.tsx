@@ -6,6 +6,7 @@ import { summarizeTeacherGrid } from "../utils/scheduler";
 interface TeacherEditorModalProps {
   initialTeacher: TeacherRecord | null; // null = เพิ่มครูใหม่
   existingIds: number[];
+  initialActiveCell?: { day: number; period: number } | null;
   onClose: () => void;
   onSave: (teacher: TeacherRecord) => Promise<void>;
 }
@@ -36,6 +37,7 @@ const QUICK_CELL_TAGS = [
 export const TeacherEditorModal: React.FC<TeacherEditorModalProps> = ({
   initialTeacher,
   existingIds,
+  initialActiveCell = null,
   onClose,
   onSave,
 }) => {
@@ -84,16 +86,31 @@ export const TeacherEditorModal: React.FC<TeacherEditorModalProps> = ({
     ];
   });
 
-  const [activeCell, setActiveCell] = useState<{ day: number; period: number } | null>(null);
+  const [activeCell, setActiveCell] = useState<{ day: number; period: number } | null>(
+    initialActiveCell
+  );
   const [errorMsg, setErrorMsg] = useState<string>("");
   const [saving, setSaving] = useState<boolean>(false);
 
-  const syncSummaryWithGrid = (nextGrid: string[][], targetRoom: string) => {
+  const syncSummaryWithGrid = (
+    nextGrid: string[][],
+    targetRoom: string,
+    targetOther = otherSummary,
+    targetIsStudent = isStudentTeacher,
+    targetGroup = pdfGroup || group
+  ) => {
+    const existingLines = coursesText
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean);
     const auto = summarizeTeacherGrid(
       nextGrid,
       targetRoom,
-      otherSummary,
-      isStudentTeacher
+      targetOther,
+      targetIsStudent,
+      targetGroup,
+      Number(id) || initialTeacher?.id,
+      existingLines.length > 0 ? existingLines : initialTeacher?.coursesSummary || []
     );
     setTotalHours(String(auto.totalHours));
     setCoursesText(auto.coursesSummary.join("\n"));
@@ -159,8 +176,8 @@ export const TeacherEditorModal: React.FC<TeacherEditorModalProps> = ({
     handleCellChange(activeCell.day, activeCell.period, tagValue);
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
     setErrorMsg("");
 
     const numId = Number(id);
@@ -182,17 +199,21 @@ export const TeacherEditorModal: React.FC<TeacherEditorModalProps> = ({
     );
     const s = cleanGrid.map((row) => row.join(",")).join("|");
 
-    const autoSummary = summarizeTeacherGrid(
-      cleanGrid,
-      room,
-      otherSummary,
-      isStudentTeacher
-    );
     const manualLines = coursesText
       .split("\n")
       .map((l) => l.trim())
       .filter(Boolean)
       .slice(0, 15);
+
+    const autoSummary = summarizeTeacherGrid(
+      cleanGrid,
+      room,
+      otherSummary,
+      isStudentTeacher,
+      pdfGroup || group,
+      numId,
+      manualLines.length > 0 ? manualLines : initialTeacher?.coursesSummary || []
+    );
     const coursesSummary =
       manualLines.length > 0 ? manualLines : autoSummary.coursesSummary;
 
@@ -232,21 +253,32 @@ export const TeacherEditorModal: React.FC<TeacherEditorModalProps> = ({
       className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 overflow-y-auto"
     >
       <div className="bg-white dark:bg-[#14204a] border border-[#c9d4ec] dark:border-[#2a3a6e] rounded-xl w-full max-w-4xl max-h-[92vh] flex flex-col shadow-xl overflow-hidden">
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 py-3 sm:px-6 sm:py-4 bg-[#12307a] text-white border-b-2 border-[#f2c230]">
-          <h3 id="modal-teacher-title" className="text-base sm:text-lg font-bold">
+        {/* Header พร้อมปุ่มบันทึกด่วนด้านบน */}
+        <div className="flex items-center justify-between gap-2 px-4 py-3 sm:px-6 sm:py-3.5 bg-[#12307a] text-white border-b-2 border-[#f2c230] shrink-0">
+          <h3 id="modal-teacher-title" className="text-sm sm:text-lg font-bold truncate">
             {isEditMode
               ? `แก้ไขข้อมูลและตารางสอน: ${initialTeacher?.id} ${initialTeacher?.n}`
               : "เพิ่มข้อมูลครู / นักศึกษาฝึกสอนใหม่ลงฐานข้อมูล"}
           </h3>
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="ปิดหน้าต่าง"
-            className="p-1.5 rounded-lg hover:bg-blue-800/60 text-white cursor-pointer"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() => void handleSubmit()}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-[#f2c230] hover:bg-[#e0b01e] text-[#0f2150] text-xs sm:text-sm font-bold shadow-xs disabled:opacity-50 cursor-pointer"
+            >
+              {isEditMode ? <Save className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+              <span>{saving ? "กำลังบันทึก..." : isEditMode ? "บันทึกการแก้ไข" : "เพิ่มลงฐานข้อมูล"}</span>
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="ปิดหน้าต่าง"
+              className="p-1.5 rounded-lg hover:bg-blue-800/60 text-white cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
 
         {/* Body */}
@@ -293,7 +325,11 @@ export const TeacherEditorModal: React.FC<TeacherEditorModalProps> = ({
               </label>
               <select
                 value={isStudentTeacher ? "student" : "regular"}
-                onChange={(e) => setIsStudentTeacher(e.target.value === "student")}
+                onChange={(e) => {
+                  const nextIsStudent = e.target.value === "student";
+                  setIsStudentTeacher(nextIsStudent);
+                  syncSummaryWithGrid(grid, room, otherSummary, nextIsStudent);
+                }}
                 className="w-full px-3 py-2 rounded-lg border border-[#c9d4ec] dark:border-[#2a3a6e] bg-white dark:bg-[#0b1330] text-sm font-semibold text-[#0f2150] dark:text-[#e9eefc]"
               >
                 <option value="regular">ครูประจำการ / บริหาร</option>
@@ -310,8 +346,12 @@ export const TeacherEditorModal: React.FC<TeacherEditorModalProps> = ({
               <select
                 value={group}
                 onChange={(e) => {
-                  setGroup(e.target.value);
-                  if (pdfGroup === group) setPdfGroup(e.target.value);
+                  const nextG = e.target.value;
+                  setGroup(nextG);
+                  if (pdfGroup === group) {
+                    setPdfGroup(nextG);
+                    syncSummaryWithGrid(grid, room, otherSummary, isStudentTeacher, nextG);
+                  }
                 }}
                 className="w-full px-3 py-2 rounded-lg border border-[#c9d4ec] dark:border-[#2a3a6e] bg-white dark:bg-[#0b1330] text-sm text-[#0f2150] dark:text-[#e9eefc]"
               >
@@ -373,7 +413,7 @@ export const TeacherEditorModal: React.FC<TeacherEditorModalProps> = ({
                 </h4>
                 <p className="text-xs text-[#51608a] dark:text-[#9fb0dc]">
                   รูปแบบวิชา: <b>รหัสวิชา ชั้น</b> (เช่น <code>ท33102 6/1</code> หรือระบุห้อง{" "}
-                  <code>ว22104 2/1@201</code>)
+                  <code>ว22104 2/1@201</code>) · เมื่อแก้ไขคาบ ระบบจะคำนวณชั่วโมงรวมและซิงก์กับตารางจัดสอนแทนอัตโนมัติ
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-1.5 shrink-0">
@@ -443,6 +483,9 @@ export const TeacherEditorModal: React.FC<TeacherEditorModalProps> = ({
                       {PERIOD_TIMES.map((_, pIdx) => {
                         const isFocused =
                           activeCell?.day === dIdx && activeCell?.period === pIdx;
+                        const isInitialTarget =
+                          initialActiveCell?.day === dIdx &&
+                          initialActiveCell?.period === pIdx;
                         return (
                           <td
                             key={pIdx}
@@ -452,6 +495,7 @@ export const TeacherEditorModal: React.FC<TeacherEditorModalProps> = ({
                           >
                             <input
                               type="text"
+                              autoFocus={isInitialTarget}
                               value={grid[dIdx]?.[pIdx] || ""}
                               onFocus={() => setActiveCell({ day: dIdx, period: pIdx })}
                               onChange={(e) => handleCellChange(dIdx, pIdx, e.target.value)}
@@ -474,13 +518,13 @@ export const TeacherEditorModal: React.FC<TeacherEditorModalProps> = ({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div>
               <label className="block text-xs font-bold text-[#0f2150] dark:text-[#e9eefc] mb-1">
-                สรุปรายวิชาที่สอน (กดปุ่มคำนวณอัตโนมัติได้ หรือเว้นว่างเพื่อให้ระบบสรุปจากตารางเอง)
+                สรุปรายวิชาที่สอน (ซิงก์อัตโนมัติกับตาราง 5×7 และฐานข้อมูลรหัสวิชา)
               </label>
               <textarea
                 rows={3}
                 value={coursesText}
                 onChange={(e) => setCoursesText(e.target.value)}
-                placeholder={"เช่น ท22102 2/1 [3], 2/2 [3]\nท32102 5/1 [2]"}
+                placeholder={"เช่น 1) ท22102 (ภาษาไทย) 2/1 [3], 2/2 [3]\n2) ท32102 (ภาษาไทย) 5/1 [2]"}
                 className="w-full px-3 py-2 rounded-lg border border-[#c9d4ec] dark:border-[#2a3a6e] bg-white dark:bg-[#0b1330] text-xs text-[#0f2150] dark:text-[#e9eefc]"
               />
             </div>
@@ -492,14 +536,23 @@ export const TeacherEditorModal: React.FC<TeacherEditorModalProps> = ({
               <textarea
                 rows={3}
                 value={otherSummary}
-                onChange={(e) => setOtherSummary(e.target.value)}
+                onChange={(e) => {
+                  const nextOther = e.target.value;
+                  setOtherSummary(nextOther);
+                  syncSummaryWithGrid(grid, room, nextOther, isStudentTeacher);
+                }}
                 className="w-full px-3 py-2 rounded-lg border border-[#c9d4ec] dark:border-[#2a3a6e] bg-white dark:bg-[#0b1330] text-xs text-[#0f2150] dark:text-[#e9eefc]"
               />
             </div>
           </div>
+        </form>
 
-          {/* Footer Buttons */}
-          <div className="flex items-center justify-end gap-2 pt-3 border-t border-[#c9d4ec] dark:border-[#2a3a6e]">
+        {/* Sticky Footer Buttons ด้านล่างที่มองเห็นตลอดเวลาโดยไม่ต้องเลื่อนจอ */}
+        <div className="flex items-center justify-between gap-2 px-4 py-3 sm:px-6 bg-[#f8faff] dark:bg-[#0b1330] border-t border-[#c9d4ec] dark:border-[#2a3a6e] shrink-0">
+          <span className="text-xs text-[#51608a] dark:text-[#9fb0dc] hidden sm:inline">
+            ข้อมูลที่บันทึกจะซิงก์ไปยังหน้าจัดสอนแทน ตารางสอน เช็คครูว่าง และฐานข้อมูลทันที
+          </span>
+          <div className="flex items-center justify-end gap-2 ml-auto">
             <button
               type="button"
               onClick={onClose}
@@ -508,15 +561,16 @@ export const TeacherEditorModal: React.FC<TeacherEditorModalProps> = ({
               ยกเลิก
             </button>
             <button
-              type="submit"
+              type="button"
               disabled={saving}
+              onClick={() => void handleSubmit()}
               className="flex items-center gap-1.5 px-5 py-2 rounded-lg bg-[#1b4fb8] hover:bg-[#153e91] text-white text-sm font-bold shadow-xs disabled:opacity-50 cursor-pointer"
             >
               {isEditMode ? <Save className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
               <span>{saving ? "กำลังบันทึก..." : isEditMode ? "บันทึกการแก้ไข" : "เพิ่มลงฐานข้อมูล"}</span>
             </button>
           </div>
-        </form>
+        </div>
       </div>
     </div>
   );

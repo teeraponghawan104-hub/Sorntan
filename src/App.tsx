@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { collection, onSnapshot, query, where } from "firebase/firestore";
 import { ActiveTab, Header } from "./components/Header";
 import { SubstitutePlanner } from "./components/SubstitutePlanner";
@@ -11,10 +11,14 @@ import {
   adjustDateToAcademicYear,
   autoAssignCombinedSubstitutes,
   buildCombinedTeacherHeader,
+  extractSubjectNamesFromCoursesSummary,
   formatCombinedReasonsSummary,
   getInitialWeekdayDate,
+  getSubjectNameFromCourse,
   isTeacherExemptFromNeedingSubstitute,
+  reconcileCombinedSubstitutes,
   renameCourseCodesInTeachers,
+  syncCoursesSummaryWithSubjectMappings,
 } from "./utils/scheduler";
 import { OperationType, db, handleFirestoreError } from "./firebase";
 import {
@@ -35,6 +39,7 @@ import {
   removeSubstituteRecordFromDatabase,
   removeTeacherFromDatabase,
   saveAcademicSettingsToCloud,
+  saveLiveWorkspaceToCloud,
   saveLocalAcademicSettings,
   saveLocalPlannerState,
   saveLocalSubjectMappings,
@@ -65,7 +70,16 @@ export default function App() {
   // สถานะ Modal แก้ไข/เพิ่มครู
   const [editorModalOpen, setEditorModalOpen] = useState<boolean>(false);
   const [editingTeacher, setEditingTeacher] = useState<TeacherRecord | null>(null);
+  const [editingFocusCell, setEditingFocusCell] = useState<{
+    day: number;
+    period: number;
+  } | null>(null);
   const [saveToastMessage, setSaveToastMessage] = useState<string>("");
+
+  const clientWriteIdRef = useRef<string>(
+    `w_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`
+  );
+  const hasUserModifiedPlannerRef = useRef<boolean>(false);
 
   // โหลดค่าเริ่มต้นของหน้าจัดครูสอนแทนจากที่บันทึกไว้ล่าสุด (หรือค่าเริ่มต้นครู 102)
   const initialDate = getInitialWeekdayDate();
@@ -103,7 +117,12 @@ export default function App() {
       initialSavedPlanner.assignments &&
       Object.keys(initialSavedPlanner.assignments).length > 0
     ) {
-      return initialSavedPlanner.assignments;
+      return reconcileCombinedSubstitutes(
+        initialTeacherIds,
+        initialSelectedDate,
+        initialSavedPlanner.assignments,
+        initialIncludeSupervision
+      );
     }
     return autoAssignCombinedSubstitutes(
       initialTeacherIds,
@@ -111,6 +130,17 @@ export default function App() {
       initialIncludeSupervision
     );
   });
+
+  const plannerStateRef = useRef({
+    absentTeacherIds,
+    selectedDate,
+    includeSupervision,
+  });
+  plannerStateRef.current = {
+    absentTeacherIds,
+    selectedDate,
+    includeSupervision,
+  };
 
   const [focusTimetableTeacherIds, setFocusTimetableTeacherIds] = useState<number[]>(
     []
@@ -135,13 +165,15 @@ export default function App() {
     let seededOnce = false;
     let lastTeachersSig = "";
     let lastRecordsSig = "";
+    let lastWorkspaceSig = "";
     let lastMappingsSig = "";
     let lastAcademicSig = "";
 
     const unsubTeachers = onSnapshot(
       teachersQuery,
       (snapshot) => {
-        if (snapshot.empty && !seededOnce) {
+        // ป้องกันการเขียนทับข้อมูลบน Cloud เมื่อแคชในเครื่องยังว่างเปล่าขณะกำลังเชื่อมต่อเซิร์ฟเวอร์
+        if (snapshot.empty && !snapshot.metadata.fromCache && !seededOnce) {
           seededOnce = true;
           syncAllTeachersToCloud(loadLocalTeachers()).catch((err) => {
             console.error("Failed to seed initial teachers to Firestore:", err);
@@ -174,6 +206,16 @@ export default function App() {
             lastTeachersSig = nextSig;
             const updated = saveLocalTeachers(cloudTeachers);
             setTeachers(updated);
+            // ซิงก์ตารางจัดสอนแทนให้ตรงกับตารางสอนล่าสุดทันทีเมื่อมีการอัปเดตตารางสอน
+            const cur = plannerStateRef.current;
+            setAssignments((prev) =>
+              reconcileCombinedSubstitutes(
+                cur.absentTeacherIds,
+                cur.selectedDate,
+                prev,
+                cur.includeSupervision
+              )
+            );
           }
         }
       },
@@ -192,9 +234,64 @@ export default function App() {
       (snapshot) => {
         const cloudRecords: SavedSubstituteRecord[] = [];
         snapshot.forEach((docSnap) => {
-          if (docSnap.id === LIVE_WORKSPACE_DOC_ID) return;
           const d = docSnap.data();
           const decoded = decodeAssignments(String(d.assignmentsJson || ""));
+
+          if (docSnap.id === LIVE_WORKSPACE_DOC_ID) {
+            const wsSig = JSON.stringify({
+              absentTeacherId: d.absentTeacherId,
+              selectedDate: d.selectedDate,
+              reason: d.reason,
+              studentTeacherName: d.studentTeacherName,
+              includeSupervision: d.includeSupervision,
+              assignmentsJson: d.assignmentsJson,
+            });
+            if (wsSig !== lastWorkspaceSig) {
+              lastWorkspaceSig = wsSig;
+              const isFromThisTab = decoded.clientWriteId === clientWriteIdRef.current;
+              const hasLocalSaved = Boolean(loadLocalPlannerState());
+              if (!isFromThisTab && (!hasUserModifiedPlannerRef.current || !hasLocalSaved)) {
+                const cloudIds = (
+                  decoded.absentTeacherIds && decoded.absentTeacherIds.length > 0
+                    ? decoded.absentTeacherIds
+                    : [String(d.absentTeacherId || "102")]
+                ).filter((id) => !isTeacherExemptFromNeedingSubstitute(id));
+                const nextIds = cloudIds.length > 0 ? cloudIds : ["102"];
+                const nextDate = String(d.selectedDate || initialDate);
+                const nextReason = String(d.reason || "ไปราชการ");
+                const nextReasons =
+                  decoded.teacherReasons && Object.keys(decoded.teacherReasons).length > 0
+                    ? decoded.teacherReasons
+                    : Object.fromEntries(nextIds.map((id) => [String(id), nextReason]));
+                const nextStudentName = String(d.studentTeacherName || "");
+                const nextIncSup = Boolean(d.includeSupervision);
+                const nextAssign = reconcileCombinedSubstitutes(
+                  nextIds,
+                  nextDate,
+                  decoded.assignments || {},
+                  nextIncSup
+                );
+
+                setAbsentTeacherIds(nextIds);
+                setSelectedDate(nextDate);
+                setReason(nextReason);
+                setTeacherReasons(nextReasons);
+                setStudentTeacherName(nextStudentName);
+                setIncludeSupervision(nextIncSup);
+                setAssignments(nextAssign);
+                saveLocalPlannerState({
+                  absentTeacherIds: nextIds,
+                  selectedDate: nextDate,
+                  reason: nextReason,
+                  teacherReasons: nextReasons,
+                  studentTeacherName: nextStudentName,
+                  includeSupervision: nextIncSup,
+                  assignments: nextAssign,
+                });
+              }
+            }
+            return;
+          }
 
           cloudRecords.push({
             recordId: String(d.recordId || docSnap.id),
@@ -280,9 +377,16 @@ export default function App() {
     };
   }, []);
 
-  // บันทึกฉบับร่างในเครื่อง (localStorage) เพื่อป้องกันข้อมูลสูญหายเมื่อรีเฟรชหน้าจอ โดยไม่บันทึกลงฐานข้อมูลอัตโนมัติ
+  // บันทึกสถานะตารางจัดสอนแทนปัจจุบันลงทั้งเครื่อง (localStorage) และฐานข้อมูลกลาง (Cloud Firestore)
   const saveLocalDraft = (nextState: LivePlannerWorkspaceState) => {
-    saveLocalPlannerState(nextState);
+    hasUserModifiedPlannerRef.current = true;
+    const stateWithClient: LivePlannerWorkspaceState = {
+      ...nextState,
+      clientWriteId: clientWriteIdRef.current,
+    };
+    saveLocalPlannerState(stateWithClient);
+    const header = buildCombinedTeacherHeader(nextState.absentTeacherIds);
+    void saveLiveWorkspaceToCloud(stateWithClient, header);
   };
 
   // เปลี่ยนครูหลักจาก #ta
@@ -341,9 +445,10 @@ export default function App() {
     if (!nextReasons[targetId]) {
       nextReasons[targetId] = reason || "ไปราชการ";
     }
-    const nextAssignments = autoAssignCombinedSubstitutes(
+    const nextAssignments = reconcileCombinedSubstitutes(
       nextIds,
       selectedDate,
+      assignments,
       includeSupervision
     );
     setAbsentTeacherIds(nextIds);
@@ -364,9 +469,10 @@ export default function App() {
   const handleRemoveAbsentTeacher = (teacherIdToRemove: string) => {
     if (absentTeacherIds.length <= 1) return;
     const nextIds = absentTeacherIds.filter((id) => id !== teacherIdToRemove);
-    const nextAssignments = autoAssignCombinedSubstitutes(
+    const nextAssignments = reconcileCombinedSubstitutes(
       nextIds,
       selectedDate,
+      assignments,
       includeSupervision
     );
     setAbsentTeacherIds(nextIds);
@@ -561,13 +667,37 @@ export default function App() {
     });
   };
 
-  // CRUD: เพิ่ม / แก้ไขครู (บันทึกลงฐานข้อมูลกลาง)
+  // CRUD: เพิ่ม / แก้ไขครู (บันทึกลงฐานข้อมูลกลาง และเชื่อมโยงกับตารางจัดสอนแทน + รหัสวิชาทันที)
   const handleSaveTeacher = async (teacherRecord: TeacherRecord) => {
     const updated = await upsertTeacherInDatabase(teacherRecord, teachers);
     setTeachers(updated);
-    const nextAssignments = autoAssignCombinedSubstitutes(
+
+    // หากผู้ใช้กำหนดหรือแก้ไขชื่อวิชาในวงเล็บในช่องสรุปรายวิชา ให้ซิงก์เข้ากับฐานข้อมูลรหัสวิชา (subjectMappings) อัตโนมัติ
+    const extractedSubjects = extractSubjectNamesFromCoursesSummary(
+      teacherRecord.coursesSummary || []
+    );
+    let mappingsChanged = false;
+    const nextMappings: Record<string, string> = { ...subjectMappings };
+    Object.entries(extractedSubjects).forEach(([code, subjName]) => {
+      const currentResolved = getSubjectNameFromCourse(
+        code,
+        teacherRecord.pdfGroup || teacherRecord.g,
+        teacherRecord.id
+      );
+      if (subjName && subjName !== currentResolved) {
+        nextMappings[code] = subjName;
+        mappingsChanged = true;
+      }
+    });
+    if (mappingsChanged) {
+      const savedMappings = await saveSubjectMappingsToCloud(nextMappings);
+      setSubjectMappings({ ...savedMappings });
+    }
+
+    const nextAssignments = reconcileCombinedSubstitutes(
       absentTeacherIds,
       selectedDate,
+      assignments,
       includeSupervision
     );
     setAssignments(nextAssignments);
@@ -581,7 +711,7 @@ export default function App() {
       assignments: nextAssignments,
     });
     setSaveToastMessage(
-      `บันทึกตารางสอนของ "${teacherRecord.id} ${teacherRecord.n}" ลงฐานข้อมูลเรียบร้อยแล้ว`
+      `บันทึกตารางสอนของ "${teacherRecord.id} ${teacherRecord.n}" และซิงก์ข้อมูลทุกหน้าเรียบร้อยแล้ว`
     );
     window.setTimeout(() => {
       setSaveToastMessage("");
@@ -599,9 +729,10 @@ export default function App() {
         : updated[0]
         ? [String(updated[0].id)]
         : [];
-    const nextAssignments = autoAssignCombinedSubstitutes(
+    const nextAssignments = reconcileCombinedSubstitutes(
       nextIds,
       selectedDate,
+      assignments,
       includeSupervision
     );
     setAbsentTeacherIds(nextIds);
@@ -713,13 +844,24 @@ export default function App() {
     setSavedRecords(updated);
   };
 
-  // CRUD: บันทึกผูกชื่อวิชาตามรหัสวิชา
+  // CRUD: บันทึกผูกชื่อวิชาตามรหัสวิชา พร้อมซิงก์ชื่อวิชาในสรุปรายวิชาท้ายตารางสอนของครูทุกคนทันที
   const handleSaveSubjectMappings = async (newMappings: Record<string, string>) => {
     const updated = await saveSubjectMappingsToCloud(newMappings);
     setSubjectMappings({ ...updated });
-    const nextAssignments = autoAssignCombinedSubstitutes(
+
+    const { updatedTeachers, changedCount } = syncCoursesSummaryWithSubjectMappings(
+      teachers,
+      updated
+    );
+    if (changedCount > 0) {
+      const syncedTeachers = await syncAllTeachersToCloud(updatedTeachers);
+      setTeachers(syncedTeachers);
+    }
+
+    const nextAssignments = reconcileCombinedSubstitutes(
       absentTeacherIds,
       selectedDate,
+      assignments,
       includeSupervision
     );
     setAssignments(nextAssignments);
@@ -729,9 +871,10 @@ export default function App() {
   const handleResetSubjectMappings = async () => {
     const updated = await saveSubjectMappingsToCloud({});
     setSubjectMappings({ ...updated });
-    const nextAssignments = autoAssignCombinedSubstitutes(
+    const nextAssignments = reconcileCombinedSubstitutes(
       absentTeacherIds,
       selectedDate,
+      assignments,
       includeSupervision
     );
     setAssignments(nextAssignments);
@@ -744,11 +887,6 @@ export default function App() {
   ): Promise<{ replacedSlotCount: number; affectedTeachersCount: number }> => {
     const { updatedTeachers, replacedSlotCount, affectedTeachersCount } =
       renameCourseCodesInTeachers(teachers, codeRenames);
-
-    if (affectedTeachersCount > 0) {
-      const syncedTeachers = await syncAllTeachersToCloud(updatedTeachers);
-      setTeachers(syncedTeachers);
-    }
 
     const nextMappings: Record<string, string> = { ...subjectMappings };
     Object.entries(codeRenames).forEach(([oldCode, newCode]) => {
@@ -771,12 +909,30 @@ export default function App() {
     const updatedMappings = await saveSubjectMappingsToCloud(nextMappings);
     setSubjectMappings({ ...updatedMappings });
 
-    const nextAssignments = autoAssignCombinedSubstitutes(
+    const { updatedTeachers: finalTeachers, changedCount } =
+      syncCoursesSummaryWithSubjectMappings(updatedTeachers, updatedMappings);
+
+    if (affectedTeachersCount > 0 || changedCount > 0) {
+      const syncedTeachers = await syncAllTeachersToCloud(finalTeachers);
+      setTeachers(syncedTeachers);
+    }
+
+    const nextAssignments = reconcileCombinedSubstitutes(
       absentTeacherIds,
       selectedDate,
+      assignments,
       includeSupervision
     );
     setAssignments(nextAssignments);
+    saveLocalDraft({
+      absentTeacherIds,
+      selectedDate,
+      reason,
+      teacherReasons,
+      studentTeacherName,
+      includeSupervision,
+      assignments: nextAssignments,
+    });
 
     return { replacedSlotCount, affectedTeachersCount };
   };
@@ -878,10 +1034,12 @@ export default function App() {
             onSelectTeacherForSubstitute={handleSelectTeacherFromDirectory}
             onOpenAddTeacher={() => {
               setEditingTeacher(null);
+              setEditingFocusCell(null);
               setEditorModalOpen(true);
             }}
-            onOpenEditTeacher={(teacher) => {
+            onOpenEditTeacher={(teacher, focusCell) => {
               setEditingTeacher(teacher);
+              setEditingFocusCell(focusCell || null);
               setEditorModalOpen(true);
             }}
           />
@@ -904,10 +1062,12 @@ export default function App() {
             onSaveAcademicSettings={handleSaveAcademicSettings}
             onOpenAddTeacher={() => {
               setEditingTeacher(null);
+              setEditingFocusCell(null);
               setEditorModalOpen(true);
             }}
             onOpenEditTeacher={(teacher) => {
               setEditingTeacher(teacher);
+              setEditingFocusCell(null);
               setEditorModalOpen(true);
             }}
             onDeleteTeacher={handleDeleteTeacher}
@@ -915,12 +1075,22 @@ export default function App() {
             onBulkSaveTeachers={async (nextTeachers) => {
               const updated = await syncAllTeachersToCloud(nextTeachers);
               setTeachers(updated);
-              const nextAssignments = autoAssignCombinedSubstitutes(
+              const nextAssignments = reconcileCombinedSubstitutes(
                 absentTeacherIds,
                 selectedDate,
+                assignments,
                 includeSupervision
               );
               setAssignments(nextAssignments);
+              saveLocalDraft({
+                absentTeacherIds,
+                selectedDate,
+                reason,
+                teacherReasons,
+                studentTeacherName,
+                includeSupervision,
+                assignments: nextAssignments,
+              });
             }}
             onLoadSubstituteRecord={handleLoadSubstituteRecord}
             onDeleteSubstituteRecord={handleDeleteSubstituteRecord}
@@ -950,9 +1120,11 @@ export default function App() {
         <TeacherEditorModal
           initialTeacher={editingTeacher}
           existingIds={teachers.map((t) => t.id)}
+          initialActiveCell={editingFocusCell}
           onClose={() => {
             setEditorModalOpen(false);
             setEditingTeacher(null);
+            setEditingFocusCell(null);
           }}
           onSave={handleSaveTeacher}
         />

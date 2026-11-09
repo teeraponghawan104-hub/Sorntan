@@ -759,9 +759,10 @@ test("Bulk subject & course code tools: parseBulkSubjectLines, exportSubjectsToC
   const { updatedTeachers, replacedSlotCount, affectedTeachersCount } =
     renameCourseCodesInTeachers(INITIAL_TEACHERS, { ว31242: "ว31241" });
   assert.ok(replacedSlotCount >= 3);
-  assert.equal(affectedTeachersCount, 1); // Teacher 305
+  assert.equal(affectedTeachersCount, 2); // Teacher 305 (grid + coursesSummary) and Teacher 302 (coursesSummary)
   const updated305 = updatedTeachers.find((t) => t.id === 305);
   assert.ok(updated305?.s.includes("ว31241 4/1"));
+  assert.ok(updated305?.coursesSummary.some((c) => c.includes("ว31241")));
   assert.ok(!updated305?.s.includes("ว31242"));
 
   // 4. Test automatic Semester 2 -> Semester 1 course code shifter
@@ -1031,6 +1032,90 @@ test("Dynamic data reorganization (editing schedules, renaming course codes, or 
     setRuntimeTeachers(INITIAL_TEACHERS);
   }
 });
+
+test("Two-way linking: summarizeTeacherGrid, formatLinkedCourseSummaryLine, syncCoursesSummaryWithSubjectMappings, and reconcileCombinedSubstitutes keep all views synchronized", async () => {
+  const {
+    summarizeTeacherGrid,
+    formatLinkedCourseSummaryLine,
+    syncCoursesSummaryWithSubjectMappings,
+    reconcileCombinedSubstitutes,
+    setRuntimeSubjectMappings,
+  } = await import("./scheduler");
+
+  try {
+    // 1. summarizeTeacherGrid preserves subject names in parentheses and ม. prefix for student teacher 307
+    const t307 = INITIAL_TEACHERS.find((t) => t.id === 307)!;
+    const summary307 = summarizeTeacherGrid(
+      t307.d!,
+      t307.r,
+      t307.otherSummary,
+      t307.isStudentTeacher,
+      t307.pdfGroup,
+      t307.id,
+      t307.coursesSummary
+    );
+    assert.equal(summary307.totalHours, 13);
+    assert.deepEqual(summary307.coursesSummary, [
+      "1) ว21102 (วิทยาศาสตร์) ม.1/1 [3], ม.1/2 [3]",
+      "2) ว31102 (วิทย์ชีวภาพ) ม.4/1 [2]",
+    ]);
+
+    // 2. formatLinkedCourseSummaryLine automatically enriches lines missing subject names AND reflects custom subjectMappings
+    assert.equal(
+      formatLinkedCourseSummaryLine("1) ว21102 1/2 [3], 1/1 [3]", "วิทยาศาสตร์", 307),
+      "1) ว21102 (วิทยาศาสตร์พื้นฐาน) 1/2 [3], 1/1 [3]"
+    );
+
+    setRuntimeSubjectMappings({ ว21102: "วิทยาศาสตร์พื้นฐาน 2" });
+    assert.equal(
+      formatLinkedCourseSummaryLine("1) ว21102 (วิทยาศาสตร์) ม.1/1 [3], ม.1/2 [3]", "วิทยาศาสตร์", 307),
+      "1) ว21102 (วิทยาศาสตร์พื้นฐาน 2) ม.1/1 [3], ม.1/2 [3]"
+    );
+
+    const { updatedTeachers, changedCount } = syncCoursesSummaryWithSubjectMappings(
+      [t307],
+      { ว21102: "วิทยาศาสตร์พื้นฐาน 2" }
+    );
+    assert.equal(changedCount, 1);
+    assert.equal(
+      updatedTeachers[0].coursesSummary[0],
+      "1) ว21102 (วิทยาศาสตร์พื้นฐาน 2) ม.1/1 [3], ม.1/2 [3]"
+    );
+
+    // 3. reconcileCombinedSubstitutes preserves valid manual assignments and automatically reassigns when a timetable edit causes a conflict
+    const initialAsg = autoAssignCombinedSubstitutes([102], "2026-11-02");
+    // Manually assign t103 to Period 1 (slotKey "102_0", where 103 is free on Monday P1)
+    const customAsg = { ...initialAsg, "102_0": "t103", "0": "t103" };
+    const reconciledSame = reconcileCombinedSubstitutes([102], "2026-11-02", customAsg);
+    assert.equal(reconciledSame["102_0"], "t103", "Valid manual substitute t103 is preserved");
+
+    // Now suppose Teacher 103's timetable is edited so 103 teaches on Monday Period 1 (d[0][0] = "ท21102 1/1")
+    const editedWith103Busy = INITIAL_TEACHERS.map((t) => {
+      if (t.id === 103) {
+        const nextD = t.d!.map((row) => [...row]);
+        nextD[0][0] = "ท21102 1/1";
+        return {
+          ...t,
+          s: nextD.map((r) => r.join(",")).join("|"),
+          d: nextD,
+        };
+      }
+      return t;
+    });
+    setRuntimeTeachers(editedWith103Busy);
+
+    const reconciledAfterEdit = reconcileCombinedSubstitutes([102], "2026-11-02", customAsg);
+    assert.notEqual(
+      reconciledAfterEdit["102_0"],
+      "t103",
+      "After 103's timetable is edited to have a class on Monday P1, 103 is automatically replaced with a free substitute"
+    );
+  } finally {
+    setRuntimeSubjectMappings({});
+    setRuntimeTeachers(INITIAL_TEACHERS);
+  }
+});
+
 
 
 
