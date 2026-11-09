@@ -96,20 +96,20 @@ test("parseScheduleCell parses regular classes, custom rooms, meetings, and acti
   assert.equal(supervision.isTeachable, false);
 });
 
-test("getTeacherClasses excludes meetings and homeroom but includes Period 7 academic classes", () => {
+test("getTeacherClasses excludes meetings, homeroom, and student-teacher co-taught classes, while including Period 7 academic classes", () => {
   // Teacher 102 on Tuesday (2026-11-03) has classes in P2 and P3, and meeting (*) in P5
   const tue102 = getTeacherClasses(102, "2026-11-03");
   assert.equal(tue102.length, 2);
   assert.equal(tue102[0].p, 1); // Period 2 (0-indexed 1)
   assert.equal(tue102[1].p, 2); // Period 3 (0-indexed 2)
 
-  // Teacher 203 on Thursday (2026-11-05) has P4 (ค22102 2/2) and P7 (ค31202 4/1)
+  // Teacher 203 on Thursday (2026-11-05) has P4 (ค22102 2/2 - taught by student teacher 205) and P7 (ค31202 4/1)
+  // P4 (ค22102 2/2) is excluded because student teacher 205 teaches it; P7 (ค31202 4/1) is included!
   const thu203 = getTeacherClasses(203, "2026-11-05");
-  assert.equal(thu203.length, 2);
-  assert.equal(thu203[0].p, 3); // Period 4
-  assert.equal(thu203[1].p, 6); // Period 7
-  assert.equal(thu203[1].code, "ค31202");
-  assert.equal(thu203[1].cls, "4/1");
+  assert.equal(thu203.length, 1);
+  assert.equal(thu203[0].p, 6); // Period 7
+  assert.equal(thu203[0].code, "ค31202");
+  assert.equal(thu203[0].cls, "4/1");
 });
 
 test("autoAssignSubstitutes and getCandidateTeachers prioritize same grade level first, then subject group", () => {
@@ -637,13 +637,13 @@ test("Word (.docx) export generates quickly, produces a compact file (< 200 KB),
   const JSZip = (await import("jszip")).default;
   const { generateDocxBlob } = await import("./exportDoc");
 
-  const t305 = TEACHERS.find((t) => t.id === 305)!;
+  const t308 = TEACHERS.find((t) => t.id === 308)!;
   const dateStr = "2026-11-04";
-  const asg = autoAssignCombinedSubstitutes([305], dateStr);
-  const rows = buildCombinedDocumentRows([305], dateStr, asg, "");
+  const asg = autoAssignCombinedSubstitutes([308], dateStr);
+  const rows = buildCombinedDocumentRows([308], dateStr, asg, "");
 
   const startMs = Date.now();
-  const blob = await generateDocxBlob(t305, dateStr, "ไปราชการ", rows);
+  const blob = await generateDocxBlob(t308, dateStr, "ไปราชการ", rows);
   const elapsedMs = Date.now() - startMs;
 
   assert.ok(elapsedMs < 500, `Word generation should be fast (< 500ms), took ${elapsedMs}ms`);
@@ -922,4 +922,115 @@ test("Per-teacher individual leave reasons (ไปราชการ, ลาก�
   assert.deepEqual(decoded.absentTeacherIds, teacherIds);
   assert.deepEqual(decoded.teacherReasons, teacherReasons);
 });
+
+test("Regular teachers' classes matching a student teacher (same course code & subject) are automatically excluded from substitute table, while different course codes or student teachers' own absences are still included", async () => {
+  const { getStudentTeacherCoveredClasses } = await import("./scheduler");
+
+  // 1) Teacher 305 (ครูศักดิ์ชัย แสงมาศ) on Tuesday (2026-11-03):
+  // Raw schedule has P1 (ว31102 4/2 - taught by ST 308), P2 (ว31102 4/1 - taught by ST 307), P5 (ว33246 6/1 - taught by 305 himself)
+  const tue305Classes = getTeacherClasses(305, "2026-11-03");
+  assert.equal(tue305Classes.length, 1, "Only P5 (ว33246 6/1) should need a substitute");
+  assert.equal(tue305Classes[0].p, 4); // Period 5
+  assert.equal(tue305Classes[0].code, "ว33246");
+
+  const tue305Covered = getStudentTeacherCoveredClasses([305], "2026-11-03");
+  assert.equal(tue305Covered.length, 2);
+  assert.equal(tue305Covered[0].code, "ว31102");
+  assert.equal(tue305Covered[0].cls, "4/2");
+  assert.equal(tue305Covered[0].studentTeacherId, 308);
+  assert.equal(tue305Covered[1].code, "ว31102");
+  assert.equal(tue305Covered[1].cls, "4/1");
+  assert.equal(tue305Covered[1].studentTeacherId, 307);
+
+  // 2) Teacher 303 (ครูสถิตย์ กาทอง) on Monday (2026-11-02):
+  // Raw schedule has P3 (ว21102 1/1 - taught by ST 307) and P6 (ว32224 5/1 - Chemistry taught by 303)
+  const mon303Classes = getTeacherClasses(303, "2026-11-02");
+  assert.equal(mon303Classes.length, 1);
+  assert.equal(mon303Classes[0].p, 5); // Period 6
+  assert.equal(mon303Classes[0].code, "ว32224");
+
+  // 3) Teacher 203 & 204 (Math) co-taught with ST 205 (ครูสุภาวรรณ ปวยทอง - ค22102 2/1 & 2/2):
+  // On Monday (2026-11-02), 204 has P1 (ค32202-พต 5/1) and P2 (ค22102 2/1 -> ST 205)
+  const mon204Classes = getTeacherClasses(204, "2026-11-02");
+  assert.equal(mon204Classes.length, 1);
+  assert.equal(mon204Classes[0].code, "ค32202-พต");
+
+  // 4) Teacher 601 (ครูปิยพงษ์ โสมาลีย์) on Friday (2026-11-06):
+  // P4 is ศ23102 5/2 (ทัศนศิลป์), whereas ST 604 has ศ32102 5/2 (ดนตรี-นาฏศิลป์) -> DIFFERENT course code & subject!
+  // So 601's Friday P4 MUST NOT be excluded!
+  const fri601Classes = getTeacherClasses(601, "2026-11-06");
+  assert.equal(fri601Classes.length, 1);
+  assert.equal(fri601Classes[0].code, "ศ23102");
+  assert.equal(fri601Classes[0].cls, "5/2");
+
+  // 5) When a student teacher themselves (e.g. 307 นายธีระพงษ์ หาวัน) is selected as absent, their classes ARE included!
+  const tue307Classes = getTeacherClasses(307, "2026-11-03");
+  assert.equal(tue307Classes.length, 2);
+  assert.equal(tue307Classes[0].code, "ว31102");
+  assert.equal(tue307Classes[1].code, "ว21102");
+});
+
+test("Dynamic data reorganization (editing schedules, renaming course codes, or adding student teachers) automatically recalculates overlapping periods and substitute assignments", async () => {
+  const {
+    getStudentTeacherCoveredClasses,
+    renameCourseCodesInTeachers,
+  } = await import("./scheduler");
+
+  try {
+    // Case A: Both mentor (305) and student teacher (307) are absent on Tuesday (2026-11-03)
+    // Period 2 (ว31102 4/1) is taught by ST 307, who is ALSO absent -> must appear ONCE in combined classes (under 307), and NOT in covered list!
+    // Period 1 (ว31102 4/2) is taught by ST 308, who is PRESENT -> must be in covered list and NOT in combined classes!
+    const combined305And307 = getCombinedTeacherClasses([305, 307], "2026-11-03");
+    const p2Slots = combined305And307.filter((s) => s.p === 1 && s.code === "ว31102");
+    assert.equal(p2Slots.length, 1, "Period 2 ว31102 4/1 should appear once for absent ST 307");
+    assert.equal(p2Slots[0].absentTeacherId, 307);
+
+    const covered305And307 = getStudentTeacherCoveredClasses([305, 307], "2026-11-03");
+    assert.equal(covered305And307.length, 1, "Only Period 1 (ST 308 present) should be listed as covered");
+    assert.equal(covered305And307[0].studentTeacherId, 308);
+
+    // Case B: Reorganize data dynamically -> suppose ST 307's course ว31102 4/1 is changed to ว39999 4/1
+    // Now Teacher 305's Tuesday Period 2 (ว31102 4/1) no longer matches any student teacher, so it MUST automatically appear on 305's substitute table!
+    const modifiedTeachers = INITIAL_TEACHERS.map((t) => {
+      if (t.id === 307) {
+        return {
+          ...t,
+          s: t.s.replace(/ว31102 4\/1/g, "ว39999 4/1"),
+        };
+      }
+      return t;
+    });
+    setRuntimeTeachers(modifiedTeachers);
+
+    const tue305AfterEdit = getTeacherClasses(305, "2026-11-03");
+    assert.equal(
+      tue305AfterEdit.length,
+      2,
+      "After ST 307 no longer teaches ว31102 4/1, 305's P2 (ว31102 4/1) automatically returns to needing a substitute"
+    );
+    assert.deepEqual(
+      tue305AfterEdit.map((c) => `${c.p + 1}:${c.code}:${c.cls}`),
+      ["2:ว31102:4/1", "5:ว33246:6/1"]
+    );
+
+    // Case C: Bulk rename ว31102 -> ว31199 across all teachers -> both 305 and ST 307/308 are updated together, so P1 & P2 are automatically exempted again!
+    const { updatedTeachers } = renameCourseCodesInTeachers(INITIAL_TEACHERS, {
+      "ว31102": "ว31199",
+    });
+    setRuntimeTeachers(updatedTeachers);
+
+    const tue305AfterBulkRename = getTeacherClasses(305, "2026-11-03");
+    assert.equal(
+      tue305AfterBulkRename.length,
+      1,
+      "After bulk renaming ว31102 -> ว31199, ST 307 & 308 still match 305's new code automatically"
+    );
+    assert.equal(tue305AfterBulkRename[0].code, "ว33246");
+  } finally {
+    // Restore original runtime teachers
+    setRuntimeTeachers(INITIAL_TEACHERS);
+  }
+});
+
+
 

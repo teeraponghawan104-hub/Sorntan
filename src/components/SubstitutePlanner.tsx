@@ -37,6 +37,7 @@ import {
   getContinuousPeriodInfo,
   getDayIndex,
   getSlotAssignment,
+  getStudentTeacherCoveredClasses,
   getSubjectNameFromCourse,
   getTeacherById,
   getTeacherClasses,
@@ -195,6 +196,10 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
         includeSupervision
       ),
     [absentTeacherIds, selectedDate, includeSupervision, teachers]
+  );
+  const studentCoveredClasses = useMemo(
+    () => getStudentTeacherCoveredClasses(absentTeacherIds, selectedDate),
+    [absentTeacherIds, selectedDate, teachers]
   );
   const docRows = useMemo(
     () =>
@@ -939,11 +944,23 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
               </p>
             </div>
           ) : combinedClasses.length === 0 ? (
-            <div className="p-3 rounded-lg bg-white dark:bg-[#14204a] border border-[#c9d4ec] dark:border-[#2a3a6e]">
+            <div className="p-3 rounded-lg bg-white dark:bg-[#14204a] border border-[#c9d4ec] dark:border-[#2a3a6e] space-y-1.5">
               <p className="text-[#0f2150] dark:text-[#e9eefc] font-semibold text-sm">
-                <b>{selectedAbsentTeachers.map((t) => t.n).join(", ")}</b> ไม่มีคาบสอนวิชาปกติในวัน
-                {DAYS[dayIdx]}
+                <b>{selectedAbsentTeachers.map((t) => t.n).join(", ")}</b>{" "}
+                {studentCoveredClasses.length > 0
+                  ? `ไม่ต้องจัดสอนแทนในวัน${DAYS[dayIdx]} (นักศึกษาฝึกสอนสอนประจำวิชาแล้ว)`
+                  : `ไม่มีคาบสอนวิชาปกติในวัน${DAYS[dayIdx]}`}
               </p>
+              {studentCoveredClasses.length > 0 && (
+                <div className="text-xs text-[#0b7a4b] dark:text-[#4fd39a] space-y-0.5 pt-1 border-t border-[#c9d4ec] dark:border-[#2a3a6e]">
+                  {studentCoveredClasses.map((sc) => (
+                    <div key={`${sc.absentTeacherId}_${sc.p}`}>
+                      • คาบที่ {sc.p + 1} <b>{sc.code}</b> ({sc.subjectName}) ม.{sc.cls} —{" "}
+                      <b>{sc.studentTeacherName}</b> (นศ.ฝึกสอน) สอนแล้ว
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           ) : (
             <div className="space-y-2.5">
@@ -952,7 +969,7 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                   <>
                     <span>{selectedAbsentTeachers[0].n}</span> · มี{" "}
                     <b className="text-[#0f2150] dark:text-[#e9eefc]">{combinedClasses.length} คาบ</b>{" "}
-                    ในวัน{DAYS[dayIdx]} ({formatThaiDate(selectedDate)})
+                    ที่ต้องจัดสอนแทนในวัน{DAYS[dayIdx]} ({formatThaiDate(selectedDate)})
                   </>
                 ) : (
                   <>
@@ -961,11 +978,25 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                       <b className="text-[#0f2150] dark:text-[#e9eefc]">
                         {combinedClasses.length} คาบ
                       </b>{" "}
-                      ในวัน{DAYS[dayIdx]} (จากครูที่ลา {selectedAbsentTeachers.length} ท่าน)
+                      ที่ต้องจัดสอนแทนในวัน{DAYS[dayIdx]} (จากครูที่ลา {selectedAbsentTeachers.length} ท่าน)
                     </span>
                   </>
                 )}
               </div>
+
+              {studentCoveredClasses.length > 0 && (
+                <div className="p-2.5 rounded-lg bg-emerald-50/80 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60 text-xs text-[#0b7a4b] dark:text-[#4fd39a] space-y-0.5">
+                  <div className="font-bold">
+                    ตัดคาบที่นักศึกษาฝึกสอนสอนอยู่แล้วออกอัตโนมัติ ({studentCoveredClasses.length} คาบ):
+                  </div>
+                  {studentCoveredClasses.map((sc) => (
+                    <div key={`${sc.absentTeacherId}_${sc.p}`}>
+                      • คาบที่ {sc.p + 1} <b>{sc.code}</b> ({sc.subjectName}) ม.{sc.cls} —{" "}
+                      <b>{sc.studentTeacherName}</b> สอนแล้ว
+                    </div>
+                  ))}
+                </div>
+              )}
 
               {combinedClasses.map((slot) => {
                 // ตรวจสอบว่ามีครูคนไหนถูกเลือกให้สอนแทนคาบอื่นในคาบเรียนเดียวกัน (slot.p) ไปแล้วบ้าง

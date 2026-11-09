@@ -155,8 +155,147 @@ export function parseScheduleCell(rawCell: string | undefined, defaultRoom: stri
   };
 }
 
+export interface StudentTeacherCoveredSlot {
+  p: number; // 0-based period index
+  tm: string;
+  code: string;
+  cls: string;
+  room: string;
+  subjectName: string;
+  absentTeacherId: number;
+  absentTeacherName: string;
+  studentTeacherId: number;
+  studentTeacherName: string;
+}
+
+/**
+ * ตรวจสอบว่าคาบสอนของครูประจำการท่านนี้ ตรงกับรายวิชา/รหัสวิชาเดียวกันที่นักศึกษาฝึกสอนเป็นผู้สอนอยู่แล้วหรือไม่
+ * หากตรงกัน (วิชาเดียวกัน รหัสวิชาเดียวกัน) ไม่ต้องนำขึ้นตารางจัดสอนแทนเนื่องจากนักศึกษาฝึกสอนสอนอยู่แล้ว
+ */
+export function findMatchingStudentTeacherForClass(
+  teacher: TeacherRecord | undefined,
+  dayIdx: number,
+  periodIdx: number,
+  parsed: ParsedCell
+): TeacherRecord | undefined {
+  if (!teacher || teacher.isStudentTeacher) return undefined;
+  if (!parsed.isTeachable || parsed.isSupervision) return undefined;
+  const targetCode = (parsed.code || "").trim();
+  if (!targetCode || targetCode === "เลือกเสรี") return undefined;
+
+  const targetSubject = getSubjectNameFromCourse(
+    targetCode,
+    teacher.pdfGroup || teacher.g,
+    teacher.id
+  );
+  const targetRoom = normalizeClassRoom(parsed.cls);
+
+  const studentTeachers = TEACHERS.filter(
+    (st) => Boolean(st.isStudentTeacher) && st.id !== teacher.id
+  );
+
+  // 1) ตรวจสอบคาบเดียวกันในวันเดียวกัน (รหัสวิชาเดียวกัน และวิชาเดียวกัน)
+  for (const st of studentTeachers) {
+    const rawStCell = st.d?.[dayIdx]?.[periodIdx] || "";
+    const stParsed = parseScheduleCell(rawStCell, st.r);
+    if (!stParsed.isTeachable || stParsed.isSupervision) continue;
+    if (stParsed.code.trim() !== targetCode) continue;
+    const stSubject = getSubjectNameFromCourse(
+      stParsed.code.trim(),
+      st.pdfGroup || st.g,
+      st.id
+    );
+    if (stSubject !== targetSubject) continue;
+    const stRoom = normalizeClassRoom(stParsed.cls);
+    if (!targetRoom || !stRoom || stRoom === targetRoom) {
+      return st;
+    }
+  }
+
+  // 2) ตรวจสอบรหัสวิชาเดียวกัน + วิชาเดียวกัน + ห้องเรียนเดียวกัน ที่นักศึกษาฝึกสอนรับผิดชอบสอนในตาราง
+  if (targetRoom) {
+    for (const st of studentTeachers) {
+      if (!st.d) continue;
+      for (let d = 0; d < 5; d++) {
+        for (let p = 0; p < 7; p++) {
+          const rawStCell = st.d[d]?.[p] || "";
+          const stParsed = parseScheduleCell(rawStCell, st.r);
+          if (!stParsed.isTeachable || stParsed.isSupervision) continue;
+          if (stParsed.code.trim() !== targetCode) continue;
+          if (normalizeClassRoom(stParsed.cls) !== targetRoom) continue;
+          const stSubject = getSubjectNameFromCourse(
+            stParsed.code.trim(),
+            st.pdfGroup || st.g,
+            st.id
+          );
+          if (stSubject === targetSubject) {
+            return st;
+          }
+        }
+      }
+    }
+  }
+
+  return undefined;
+}
+
+/**
+ * ดึงรายการคาบของครูที่ลา ซึ่งถูกยกเว้นไม่ต้องนำขึ้นตารางจัดสอนแทนเนื่องจากตรงกับวิชา/รหัสวิชาที่นักศึกษาฝึกสอนสอนแล้ว
+ */
+export function getStudentTeacherCoveredClasses(
+  teacherIds: (string | number)[],
+  dateStr: string
+): StudentTeacherCoveredSlot[] {
+  const dayIdx = getDayIndex(dateStr);
+  if (dayIdx < 0) return [];
+
+  const absentIdSet = new Set(teacherIds.map(Number).filter(Boolean));
+  const seenTeachers = new Set<number>();
+  const covered: StudentTeacherCoveredSlot[] = [];
+
+  for (const rawId of teacherIds) {
+    if (isTeacherExemptFromNeedingSubstitute(rawId)) continue;
+    const teacher = getTeacherById(rawId);
+    if (!teacher || teacher.isStudentTeacher || !teacher.d || seenTeachers.has(teacher.id)) {
+      continue;
+    }
+    seenTeachers.add(teacher.id);
+
+    const daySchedule = teacher.d[dayIdx] || [];
+    PERIOD_TIMES.forEach((tm, p) => {
+      if (dayIdx === 3 && p === 0) return;
+      const parsed = parseScheduleCell(daySchedule[p], teacher.r);
+      if (!parsed.isTeachable || parsed.isSupervision) return;
+      const matchedSt = findMatchingStudentTeacherForClass(teacher, dayIdx, p, parsed);
+      // หากนักศึกษาฝึกสอนไม่ได้ลาในวันเดียวกัน จึงถือว่านักศึกษาฝึกสอนสอนอยู่แล้ว (หากนักศึกษาลาด้วย คาบนั้นจะไปขึ้นตารางจัดสอนแทนในชื่อนักศึกษา)
+      if (matchedSt && !absentIdSet.has(matchedSt.id)) {
+        covered.push({
+          p,
+          tm,
+          code: parsed.code,
+          cls: parsed.cls,
+          room: parsed.room,
+          subjectName: getSubjectNameFromCourse(
+            parsed.code,
+            teacher.pdfGroup || teacher.g,
+            teacher.id
+          ),
+          absentTeacherId: teacher.id,
+          absentTeacherName: teacher.n,
+          studentTeacherId: matchedSt.id,
+          studentTeacherName: matchedSt.n,
+        });
+      }
+    });
+  }
+
+  covered.sort((a, b) => a.p - b.p);
+  return covered;
+}
+
 /**
  * ดึงรายการคาบสอนของครูในวันที่เลือก
+ * (ตัดคาบของครูประจำการที่ตรงกับรหัสวิชาและวิชาเดียวกันที่นักศึกษาฝึกสอนสอนอยู่แล้วออกโดยอัตโนมัติ)
  */
 export function getTeacherClasses(
   teacherId: string | number,
@@ -179,6 +318,16 @@ export function getTeacherClasses(
 
     const parsed = parseScheduleCell(daySchedule[p], teacher.r);
     if (parsed.isTeachable || (includeSupervision && parsed.isSupervision)) {
+      // หากเป็นครูประจำการ และคาบนี้ตรงกับรหัสวิชา/วิชาเดียวกันที่นักศึกษาฝึกสอนเป็นผู้สอนอยู่แล้ว ไม่ต้องนำขึ้นตารางจัดสอนแทน
+      if (
+        !teacher.isStudentTeacher &&
+        parsed.isTeachable &&
+        !parsed.isSupervision &&
+        findMatchingStudentTeacherForClass(teacher, dayIdx, p, parsed)
+      ) {
+        return;
+      }
+
       results.push({
         p,
         tm,
@@ -198,6 +347,7 @@ export function getTeacherClasses(
  * ดึงรายการคาบสอนรวมของครูที่ลาทุกคนในวันเดียวกัน เพื่อนำมาเรียงรวมในตารางเดียวกัน
  * เรียงตามลำดับคาบที่ 1..7 แล้วตามลำดับครูที่เลือก
  * โดยยกเว้นครู 302 (ครูรณสิทธิ์ ประดับศรี) ที่ไม่ต้องจัดสอนแทนให้
+ * และตัดคาบซ้ำกรณีครูที่ลาหลายท่านมีรหัสวิชาและห้องเรียนเดียวกันในคาบเดียวกัน
  */
 export function getCombinedTeacherClasses(
   teacherIds: (string | number)[],
@@ -217,10 +367,20 @@ export function getCombinedTeacherClasses(
   }
 
   const combined: { orderIdx: number; slot: CombinedClassSlot }[] = [];
+  const seenClassSlots = new Set<string>();
 
   validTeachers.forEach((teacher, orderIdx) => {
     const classes = getTeacherClasses(teacher.id, dateStr, includeSupervision);
     classes.forEach((c) => {
+      if (!c.isSupervision) {
+        const normRoom = normalizeClassRoom(c.cls) || c.cls.trim();
+        const dedupKey = `${c.p}::${c.code.trim()}::${normRoom}`;
+        if (seenClassSlots.has(dedupKey)) {
+          return;
+        }
+        seenClassSlots.add(dedupKey);
+      }
+
       combined.push({
         orderIdx,
         slot: {
@@ -1998,7 +2158,9 @@ export function buildSemesterCourseCodeShiftMap(
  */
 export function summarizeTeacherGrid(
   grid: string[][],
-  defaultRoom = "-"
+  defaultRoom = "-",
+  otherSummary = "",
+  isStudentTeacher = false
 ): {
   totalHours: number;
   coursesSummary: string[];
@@ -2025,15 +2187,20 @@ export function summarizeTeacherGrid(
     }
   }
 
-  const coursesSummary = Object.entries(courseClassCounts).map(([code, clsMap]) => {
+  const coursesSummary = Object.entries(courseClassCounts).map(([code, clsMap], idx) => {
     const clsParts = Object.entries(clsMap)
       .map(([cls, count]) => `${cls} [${count}]`)
       .join(", ");
-    return `${code} ${clsParts}`;
+    return `${idx + 1}) ${code} ${clsParts}`;
   });
 
-  // นับรวมคาบสอน + กิจกรรม + PLC มาตรฐาน 5 ชม. (หรือตามจำนวนคาบจริงหากเกิน)
-  const totalHours = teachableCount + activityCount + 5;
+  const plcMatch = (otherSummary || "").match(/PLC\s*\[(\d+)\]/i);
+  const plcHours = plcMatch
+    ? Number(plcMatch[1])
+    : isStudentTeacher
+    ? 0
+    : 5;
+  const totalHours = teachableCount + activityCount + plcHours;
 
   return {
     totalHours,

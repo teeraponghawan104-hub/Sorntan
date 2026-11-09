@@ -374,42 +374,48 @@ export async function upsertTeacherInDatabase(
   const docId = getTeacherDocId(clean.id);
   const path = `teachers/${docId}`;
   const docRef = doc(db, "teachers", docId);
-  try {
-    const existingSnap = await getDoc(docRef);
-    if (existingSnap.exists()) {
-      await updateDoc(docRef, {
-        id: clean.id,
-        n: clean.n,
-        g: clean.g,
-        pdfGroup: clean.pdfGroup,
-        r: clean.r,
-        totalHours: clean.totalHours,
-        coursesSummary: clean.coursesSummary,
-        otherSummary: clean.otherSummary,
-        s: clean.s,
-        isStudentTeacher: Boolean(clean.isStudentTeacher),
-        updatedAt: serverTimestamp(),
-      });
-    } else {
-      await setDoc(docRef, {
-        id: clean.id,
-        n: clean.n,
-        g: clean.g,
-        pdfGroup: clean.pdfGroup,
-        r: clean.r,
-        totalHours: clean.totalHours,
-        coursesSummary: clean.coursesSummary,
-        otherSummary: clean.otherSummary,
-        s: clean.s,
-        isStudentTeacher: Boolean(clean.isStudentTeacher),
-        ownerId: SHARED_OWNER_ID,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
+
+  await enqueueCloudWrite(async () => {
+    try {
+      const existingSnap = await getDoc(docRef);
+      if (existingSnap.exists()) {
+        const existingData = existingSnap.data();
+        await updateDoc(docRef, {
+          id: clean.id,
+          n: clean.n,
+          g: clean.g,
+          pdfGroup: clean.pdfGroup,
+          r: clean.r,
+          totalHours: clean.totalHours,
+          coursesSummary: clean.coursesSummary,
+          otherSummary: clean.otherSummary,
+          s: clean.s,
+          isStudentTeacher: Boolean(clean.isStudentTeacher),
+          ownerId: SHARED_OWNER_ID,
+          ...(existingData?.createdAt ? {} : { createdAt: serverTimestamp() }),
+          updatedAt: serverTimestamp(),
+        });
+      } else {
+        await setDoc(docRef, {
+          id: clean.id,
+          n: clean.n,
+          g: clean.g,
+          pdfGroup: clean.pdfGroup,
+          r: clean.r,
+          totalHours: clean.totalHours,
+          coursesSummary: clean.coursesSummary,
+          otherSummary: clean.otherSummary,
+          s: clean.s,
+          isStudentTeacher: Boolean(clean.isStudentTeacher),
+          ownerId: SHARED_OWNER_ID,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, path);
     }
-  } catch (error) {
-    handleFirestoreError(error, OperationType.WRITE, path);
-  }
+  });
 
   return savedLocal;
 }

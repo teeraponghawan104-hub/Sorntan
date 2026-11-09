@@ -88,10 +88,22 @@ export const TeacherEditorModal: React.FC<TeacherEditorModalProps> = ({
   const [errorMsg, setErrorMsg] = useState<string>("");
   const [saving, setSaving] = useState<boolean>(false);
 
+  const syncSummaryWithGrid = (nextGrid: string[][], targetRoom: string) => {
+    const auto = summarizeTeacherGrid(
+      nextGrid,
+      targetRoom,
+      otherSummary,
+      isStudentTeacher
+    );
+    setTotalHours(String(auto.totalHours));
+    setCoursesText(auto.coursesSummary.join("\n"));
+  };
+
   const handleCellChange = (dayIdx: number, periodIdx: number, val: string) => {
     setGrid((prev) => {
       const next = prev.map((r) => [...r]);
       next[dayIdx][periodIdx] = val;
+      syncSummaryWithGrid(next, room);
       return next;
     });
   };
@@ -119,20 +131,14 @@ export const TeacherEditorModal: React.FC<TeacherEditorModalProps> = ({
           next[dIdx][pIdx] = cellVal.replace(/[|,]/g, " ").trim();
         });
       });
-      const auto = summarizeTeacherGrid(next, room);
-      setTotalHours(String(auto.totalHours));
-      if (auto.coursesSummary.length > 0) {
-        setCoursesText(auto.coursesSummary.join("\n"));
-      }
+      syncSummaryWithGrid(next, room);
       return next;
     });
   };
 
   // คำนวณชั่วโมงรวมและสรุปรายวิชาจากตาราง 5x7 อัตโนมัติในคลิกเดียว
   const handleAutoSummarizeFromGrid = () => {
-    const auto = summarizeTeacherGrid(grid, room);
-    setTotalHours(String(auto.totalHours));
-    setCoursesText(auto.coursesSummary.join("\n"));
+    syncSummaryWithGrid(grid, room);
   };
 
   // ล้างเฉพาะวิชาเรียนเพื่อจัดตารางภาคเรียนใหม่ (คงโฮมรูมและกิจกรรมคาบ 7 ไว้)
@@ -145,8 +151,7 @@ export const TeacherEditorModal: React.FC<TeacherEditorModalProps> = ({
       ["", "", "", "", "", "", "#แนะแนว"],
     ];
     setGrid(freshGrid);
-    setCoursesText("");
-    setTotalHours("11");
+    syncSummaryWithGrid(freshGrid, room);
   };
 
   const applyQuickTagToActiveCell = (tagValue: string) => {
@@ -172,11 +177,17 @@ export const TeacherEditorModal: React.FC<TeacherEditorModalProps> = ({
       return;
     }
 
-    const s = grid
-      .map((row) => row.map((c) => c.replace(/[|,]/g, " ").trim()).join(","))
-      .join("|");
+    const cleanGrid = grid.map((row) =>
+      row.map((c) => String(c || "").replace(/[|,]/g, " ").trim())
+    );
+    const s = cleanGrid.map((row) => row.join(",")).join("|");
 
-    const autoSummary = summarizeTeacherGrid(grid, room);
+    const autoSummary = summarizeTeacherGrid(
+      cleanGrid,
+      room,
+      otherSummary,
+      isStudentTeacher
+    );
     const manualLines = coursesText
       .split("\n")
       .map((l) => l.trim())
@@ -199,7 +210,7 @@ export const TeacherEditorModal: React.FC<TeacherEditorModalProps> = ({
       otherSummary: otherSummary.trim(),
       s,
       isStudentTeacher,
-      d: grid,
+      d: cleanGrid,
     };
 
     try {

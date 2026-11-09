@@ -65,6 +65,7 @@ export default function App() {
   // สถานะ Modal แก้ไข/เพิ่มครู
   const [editorModalOpen, setEditorModalOpen] = useState<boolean>(false);
   const [editingTeacher, setEditingTeacher] = useState<TeacherRecord | null>(null);
+  const [saveToastMessage, setSaveToastMessage] = useState<string>("");
 
   // โหลดค่าเริ่มต้นของหน้าจัดครูสอนแทนจากที่บันทึกไว้ล่าสุด (หรือค่าเริ่มต้นครู 102)
   const initialDate = getInitialWeekdayDate();
@@ -132,7 +133,6 @@ export default function App() {
     );
 
     let seededOnce = false;
-    let migrated305Once = false;
     let lastTeachersSig = "";
     let lastRecordsSig = "";
     let lastMappingsSig = "";
@@ -149,7 +149,7 @@ export default function App() {
           return;
         }
         if (!snapshot.empty) {
-          let cloudTeachers: TeacherRecord[] = [];
+          const cloudTeachers: TeacherRecord[] = [];
           snapshot.forEach((docSnap) => {
             const d = docSnap.data();
             cloudTeachers.push({
@@ -167,34 +167,6 @@ export default function App() {
               isStudentTeacher: Boolean(d.isStudentTeacher),
             });
           });
-
-          // อัปเดตอัตโนมัติ: โอนคาบสอนของ 302 (ครูรณสิทธิ์ ประดับศรี) ไปให้ 305 (ครูศักดิ์ชัย แสงมาศ) ทั้งหมดโดยตัดคาบประจำเดิมของ 305 ออกก่อน
-          const cloud305 = cloudTeachers.find((t) => t.id === 305);
-          const cloud302 = cloudTeachers.find((t) => t.id === 302);
-          const init305 = INITIAL_TEACHERS.find((t) => t.id === 305);
-          const init302 = INITIAL_TEACHERS.find((t) => t.id === 302);
-
-          if (
-            init305 &&
-            init302 &&
-            ((cloud305 &&
-              (!cloud305.s.includes("ว31242") ||
-                cloud305.s.includes("ว21102") ||
-                cloud305.r !== init305.r)) ||
-              (cloud302 && cloud302.s.includes("ว31242")))
-          ) {
-            cloudTeachers = cloudTeachers.map((t) => {
-              if (t.id === 305) return { ...init305 };
-              if (t.id === 302) return { ...init302 };
-              return t;
-            });
-            if (!migrated305Once) {
-              migrated305Once = true;
-              syncAllTeachersToCloud(cloudTeachers).catch((err) => {
-                console.error("Failed to sync migrated 302/305 schedules:", err);
-              });
-            }
-          }
 
           cloudTeachers.sort((a, b) => a.id - b.id);
           const nextSig = JSON.stringify(cloudTeachers);
@@ -599,6 +571,21 @@ export default function App() {
       includeSupervision
     );
     setAssignments(nextAssignments);
+    saveLocalDraft({
+      absentTeacherIds,
+      selectedDate,
+      reason,
+      teacherReasons,
+      studentTeacherName,
+      includeSupervision,
+      assignments: nextAssignments,
+    });
+    setSaveToastMessage(
+      `บันทึกตารางสอนของ "${teacherRecord.id} ${teacherRecord.n}" ลงฐานข้อมูลเรียบร้อยแล้ว`
+    );
+    window.setTimeout(() => {
+      setSaveToastMessage("");
+    }, 3500);
   };
 
   // CRUD: ลบครู (ลบจากฐานข้อมูลกลาง)
@@ -619,6 +606,15 @@ export default function App() {
     );
     setAbsentTeacherIds(nextIds);
     setAssignments(nextAssignments);
+    saveLocalDraft({
+      absentTeacherIds: nextIds,
+      selectedDate,
+      reason,
+      teacherReasons,
+      studentTeacherName,
+      includeSupervision,
+      assignments: nextAssignments,
+    });
   };
 
   // CRUD: กู้คืนข้อมูลเริ่มต้นจาก PDF ทั้ง 31 ท่าน
@@ -631,6 +627,15 @@ export default function App() {
       includeSupervision
     );
     setAssignments(nextAssignments);
+    saveLocalDraft({
+      absentTeacherIds,
+      selectedDate,
+      reason,
+      teacherReasons,
+      studentTeacherName,
+      includeSupervision,
+      assignments: nextAssignments,
+    });
   };
 
   // CRUD: บันทึกใบสอนแทนปัจจุบันลงฐานข้อมูลกลาง (เมื่อผู้ใช้กดปุ่มบันทึกประวัติ)
@@ -712,12 +717,24 @@ export default function App() {
   const handleSaveSubjectMappings = async (newMappings: Record<string, string>) => {
     const updated = await saveSubjectMappingsToCloud(newMappings);
     setSubjectMappings({ ...updated });
+    const nextAssignments = autoAssignCombinedSubstitutes(
+      absentTeacherIds,
+      selectedDate,
+      includeSupervision
+    );
+    setAssignments(nextAssignments);
   };
 
   // CRUD: รีเซ็ตชื่อวิชาตามรหัสวิชาทั้งหมด
   const handleResetSubjectMappings = async () => {
     const updated = await saveSubjectMappingsToCloud({});
     setSubjectMappings({ ...updated });
+    const nextAssignments = autoAssignCombinedSubstitutes(
+      absentTeacherIds,
+      selectedDate,
+      includeSupervision
+    );
+    setAssignments(nextAssignments);
   };
 
   // CRUD: เปลี่ยนรหัสวิชาแบบกลุ่มในตารางสอนของครูทุกคน พร้อมอัปเดตชื่อวิชาที่ผูกไว้ในครั้งเดียว
@@ -753,6 +770,13 @@ export default function App() {
 
     const updatedMappings = await saveSubjectMappingsToCloud(nextMappings);
     setSubjectMappings({ ...updatedMappings });
+
+    const nextAssignments = autoAssignCombinedSubstitutes(
+      absentTeacherIds,
+      selectedDate,
+      includeSupervision
+    );
+    setAssignments(nextAssignments);
 
     return { replacedSlotCount, affectedTeachersCount };
   };
@@ -799,6 +823,21 @@ export default function App() {
       />
 
       <main className="max-w-[1360px] mx-auto p-3 sm:p-4 md:p-5">
+        {saveToastMessage && (
+          <div
+            role="status"
+            className="mb-3 px-4 py-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-400 dark:border-emerald-700 text-emerald-900 dark:text-emerald-200 text-sm font-bold flex items-center justify-between shadow-xs print:hidden"
+          >
+            <span>{saveToastMessage}</span>
+            <button
+              type="button"
+              onClick={() => setSaveToastMessage("")}
+              className="text-xs font-semibold underline ml-3 cursor-pointer"
+            >
+              ปิด
+            </button>
+          </div>
+        )}
         {activeTab === "planner" && (
           <SubstitutePlanner
             teachers={teachers}
