@@ -41,6 +41,7 @@ import {
   getTeacherById,
   getTeacherClasses,
   isTeacherExemptFromNeedingSubstitute,
+  resolveTeacherReason,
 } from "../utils/scheduler";
 import {
   LEFT_SCHOOL_LOGO_URL,
@@ -70,6 +71,8 @@ interface SubstitutePlannerProps {
   onChangeDate: (date: string) => void;
   reason: string;
   onChangeReason: (reason: string) => void;
+  teacherReasons?: Record<string, string>;
+  onChangeTeacherReason?: (teacherId: string, reason: string) => void;
   studentTeacherName: string;
   onChangeStudentTeacherName: (name: string) => void;
   assignments: Record<string, string>;
@@ -98,6 +101,8 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
   onChangeDate,
   reason,
   onChangeReason,
+  teacherReasons = {},
+  onChangeTeacherReason,
   studentTeacherName,
   onChangeStudentTeacherName,
   assignments,
@@ -198,7 +203,9 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
         selectedDate,
         assignments,
         studentTeacherName,
-        includeSupervision
+        includeSupervision,
+        reason,
+        teacherReasons
       ),
     [
       absentTeacherIds,
@@ -206,6 +213,8 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
       assignments,
       studentTeacherName,
       includeSupervision,
+      reason,
+      teacherReasons,
       teachers,
     ]
   );
@@ -248,6 +257,7 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
       pdfGroup: combinedHeaderTeacher.pdfGroup,
       selectedDate,
       reason,
+      teacherReasons,
       rows: docRows,
       fontReadyTick,
       plannerName: academicSettings.plannerName,
@@ -260,6 +270,7 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
     dayIdx,
     selectedDate,
     reason,
+    teacherReasons,
     docRows,
     fontReadyTick,
     academicSettings.plannerName,
@@ -409,7 +420,8 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
       selectedAbsentTeachers,
       selectedDate,
       reason,
-      docRows
+      docRows,
+      teacherReasons
     );
     try {
       if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -565,6 +577,7 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                     selectedDate,
                     includeSupervision
                   );
+                  const tReason = resolveTeacherReason(t.id, reason, teacherReasons);
                   return (
                     <span
                       key={t.id}
@@ -581,7 +594,7 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                         </span>
                         <span className="font-semibold">{t.n}</span>
                         <span className="text-[#51608a] dark:text-[#9fb0dc] text-[11px]">
-                          ({tClasses.length} คาบ)
+                          ({tClasses.length} คาบ{selectedAbsentTeachers.length > 1 ? ` · ${tReason}` : ""})
                         </span>
                       </button>
                       {selectedAbsentTeachers.length > 1 && (
@@ -707,39 +720,152 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
             </div>
           </div>
 
-          {/* เหตุผล / ภารกิจ */}
-          <div>
-            <label
-              htmlFor="wy"
-              className="block text-xs font-bold text-[#0f2150] dark:text-[#e9eefc] mb-1"
-            >
-              เหตุผล / ภารกิจ (แสดงในช่องหมายเหตุ)
-            </label>
-            <input
-              type="text"
-              id="wy"
-              value={reason}
-              onChange={(e) => onChangeReason(e.target.value)}
-              placeholder="เช่น ไปราชการ, อบรม, ลากิจ"
-              className="w-full px-3 py-1.5 text-sm rounded-lg border border-[#c9d4ec] dark:border-[#2a3a6e] bg-white dark:bg-[#0b1330] text-[#0f2150] dark:text-[#e9eefc] focus:outline-2 focus:outline-[#f2c230]"
-            />
-            <div className="flex flex-wrap gap-1 mt-1.5">
-              {REASON_PRESETS.map((preset) => (
-                <button
-                  key={preset}
-                  type="button"
-                  onClick={() => onChangeReason(preset)}
-                  className={`px-2 py-0.5 rounded-md text-xs transition-colors cursor-pointer ${
-                    reason === preset
-                      ? "bg-[#1b4fb8] text-white font-semibold"
-                      : "bg-white dark:bg-[#14204a] border border-[#c9d4ec] dark:border-[#2a3a6e] text-[#51608a] dark:text-[#9fb0dc] hover:text-[#0f2150]"
-                  }`}
-                >
-                  {preset}
-                </button>
-              ))}
+          {/* เหตุผล / ภารกิจ (รองรับทั้งครูท่านเดียว และแยกเหตุผลรายบุคคลเมื่อมีครูลาหลายท่าน) */}
+          {selectedAbsentTeachers.length <= 1 ? (
+            <div>
+              <label
+                htmlFor="wy"
+                className="block text-xs font-bold text-[#0f2150] dark:text-[#e9eefc] mb-1"
+              >
+                เหตุผล / ภารกิจ (แสดงในช่องหมายเหตุ)
+              </label>
+              <input
+                type="text"
+                id="wy"
+                value={
+                  primaryTeacherId && teacherReasons[primaryTeacherId] !== undefined
+                    ? teacherReasons[primaryTeacherId]
+                    : reason
+                }
+                onChange={(e) => {
+                  const val = e.target.value;
+                  onChangeReason(val);
+                  if (primaryTeacherId && onChangeTeacherReason) {
+                    onChangeTeacherReason(primaryTeacherId, val);
+                  }
+                }}
+                placeholder="พิมพ์เหตุผลการลา หรือเลือกปุ่มลัดด้านล่าง เช่น ไปราชการ, ลากิจ, ลาป่วย"
+                className="w-full px-3 py-1.5 text-sm rounded-lg border border-[#c9d4ec] dark:border-[#2a3a6e] bg-white dark:bg-[#0b1330] text-[#0f2150] dark:text-[#e9eefc] focus:outline-2 focus:outline-[#f2c230]"
+              />
+              <div className="flex flex-wrap gap-1 mt-1.5">
+                {REASON_PRESETS.map((preset) => {
+                  const activeReason =
+                    primaryTeacherId && teacherReasons[primaryTeacherId] !== undefined
+                      ? teacherReasons[primaryTeacherId]
+                      : reason;
+                  return (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => {
+                        onChangeReason(preset);
+                        if (primaryTeacherId && onChangeTeacherReason) {
+                          onChangeTeacherReason(primaryTeacherId, preset);
+                        }
+                      }}
+                      className={`px-2 py-0.5 rounded-md text-xs transition-colors cursor-pointer ${
+                        activeReason === preset
+                          ? "bg-[#1b4fb8] text-white font-semibold"
+                          : "bg-white dark:bg-[#14204a] border border-[#c9d4ec] dark:border-[#2a3a6e] text-[#51608a] dark:text-[#9fb0dc] hover:text-[#0f2150]"
+                      }`}
+                    >
+                      {preset}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-          </div>
+          ) : (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <span className="text-xs font-bold text-[#0f2150] dark:text-[#e9eefc]">
+                  เหตุผล / ภารกิจ แยกรายบุคคล (แสดงในช่องหมายเหตุของครูแต่ละท่าน)
+                </span>
+              </div>
+
+              <div className="space-y-2">
+                {selectedAbsentTeachers.map((t) => {
+                  const tKey = String(t.id);
+                  const currentTeacherReason =
+                    teacherReasons[tKey] !== undefined ? teacherReasons[tKey] : reason;
+                  return (
+                    <div
+                      key={t.id}
+                      className="p-2.5 rounded-lg bg-white dark:bg-[#14204a] border border-[#c9d4ec] dark:border-[#2a3a6e] space-y-1.5"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <label
+                          htmlFor={`wy-${t.id}`}
+                          className="text-xs font-bold text-[#0f2150] dark:text-[#e9eefc] flex items-center gap-1.5"
+                        >
+                          <span className="px-1.5 py-0.5 rounded bg-[#eaf0fa] dark:bg-[#0b1330] text-[#1b4fb8] dark:text-[#6c97ff] font-bold">
+                            {t.id}
+                          </span>
+                          <span>{t.n}</span>
+                        </label>
+                        <span className="text-[11px] text-[#51608a] dark:text-[#9fb0dc]">
+                          {t.pdfGroup}
+                        </span>
+                      </div>
+                      <input
+                        type="text"
+                        id={`wy-${t.id}`}
+                        aria-label={`เหตุผลการลาของ ${t.id} ${t.n}`}
+                        value={currentTeacherReason}
+                        onChange={(e) => {
+                          if (onChangeTeacherReason) {
+                            onChangeTeacherReason(tKey, e.target.value);
+                          } else {
+                            onChangeReason(e.target.value);
+                          }
+                        }}
+                        placeholder="พิมพ์เหตุผลการลา หรือกดเลือกปุ่มลัดด้านล่าง..."
+                        className="w-full px-2.5 py-1.5 text-xs sm:text-sm rounded-md border border-[#c9d4ec] dark:border-[#2a3a6e] bg-[#f8faff] dark:bg-[#0b1330] text-[#0f2150] dark:text-[#e9eefc] focus:outline-2 focus:outline-[#f2c230]"
+                      />
+                      <div className="flex flex-wrap gap-1">
+                        {REASON_PRESETS.map((preset) => (
+                          <button
+                            key={preset}
+                            type="button"
+                            onClick={() => {
+                              if (onChangeTeacherReason) {
+                                onChangeTeacherReason(tKey, preset);
+                              } else {
+                                onChangeReason(preset);
+                              }
+                            }}
+                            className={`px-2 py-0.5 rounded text-[11px] transition-colors cursor-pointer ${
+                              currentTeacherReason === preset
+                                ? "bg-[#1b4fb8] text-white font-semibold"
+                                : "bg-[#f8faff] dark:bg-[#0b1330] border border-[#c9d4ec] dark:border-[#2a3a6e] text-[#51608a] dark:text-[#9fb0dc] hover:text-[#0f2150]"
+                            }`}
+                          >
+                            {preset}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
+                <span className="text-[11px] font-semibold text-[#51608a] dark:text-[#9fb0dc]">
+                  ตั้งให้เหมือนกันทุกคน:
+                </span>
+                {REASON_PRESETS.map((preset) => (
+                  <button
+                    key={`all-${preset}`}
+                    type="button"
+                    onClick={() => onChangeReason(preset)}
+                    className="px-2 py-0.5 rounded bg-white dark:bg-[#14204a] border border-[#c9d4ec] dark:border-[#2a3a6e] text-[11px] text-[#1b4fb8] dark:text-[#6c97ff] hover:bg-[#eaf0fa] dark:hover:bg-blue-950 font-semibold cursor-pointer"
+                  >
+                    {preset}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* ช่องระบุชื่อ นศ.ฝึกสอน เพิ่มเติม (แสดงเฉพาะเมื่อมีการเลือกตัวเลือก "นักศึกษาฝึกสอน (ระบุชื่อเอง)" ในคาบเรียน) */}
           {hasCustomStudentTeacherSelected && (
@@ -954,7 +1080,7 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                         </span>
                         {selectedAbsentTeachers.length > 1 && (
                           <span className="px-1.5 py-0.5 rounded-md bg-amber-50 dark:bg-amber-950/60 text-xs font-semibold text-amber-900 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
-                            แทน {slot.absentTeacherName}
+                            แทน {slot.absentTeacherName} ({resolveTeacherReason(slot.absentTeacherId, reason, teacherReasons)})
                           </span>
                         )}
                       </div>
@@ -1388,7 +1514,8 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                           getSubjectNameFromCourse(row.code, combinedHeaderTeacher.g);
                         const rowShortDate =
                           row.shortDate || formatShortThaiDate(selectedDate);
-                        const noteStr = (reason || "ไปราชการ").trim() || "ไปราชการ";
+                        const noteStr =
+                          (row.note || reason || "ไปราชการ").trim() || "ไปราชการ";
 
                         return (
                           <tr key={row.slotKey || `${row.p}-${idx}`}>

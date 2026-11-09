@@ -46,6 +46,7 @@ export interface SubstituteRow {
   classRoomLabel?: string;  // ห้อง เช่น ม.1/2, ม.3/1
   subjectName?: string;     // วิชา เช่น ภาษาไทย, คณิตศาสตร์
   shortDate?: string;       // วันที่รูปแบบย่อ พ.ศ. เช่น 18/05/69
+  note?: string;            // หมายเหตุ / เหตุผลการลารายบุคคลของครูที่ลาในคาบนี้ เช่น ไปราชการ, ลากิจ, ลาป่วย
 }
 
 export function getTeacherById(id: string | number): TeacherRecord | undefined {
@@ -1314,6 +1315,54 @@ export function formatThaiMonthYearHeader(dateStr: string): string {
 }
 
 /**
+ * ดึงเหตุผลการลาของครูแต่ละท่าน (หากไม่ได้ระบุแยกเฉพาะคน จะใช้เหตุผลหลัก defaultReason)
+ */
+export function resolveTeacherReason(
+  teacherId: string | number | undefined,
+  defaultReason: string = "ไปราชการ",
+  teacherReasons?: Record<string, string>
+): string {
+  const fallback = (defaultReason || "ไปราชการ").trim() || "ไปราชการ";
+  if (teacherId === undefined || teacherId === null || !teacherReasons) {
+    return fallback;
+  }
+  const byId = teacherReasons[String(teacherId)];
+  if (typeof byId === "string" && byId.trim()) {
+    return byId.trim();
+  }
+  return fallback;
+}
+
+/**
+ * สรุปข้อความเหตุผลการลารวมสำหรับบันทึกประวัติ (กรณีลาหลายคนและเหตุผลต่างกัน)
+ */
+export function formatCombinedReasonsSummary(
+  absentTeachers: TeacherRecord[],
+  defaultReason: string = "ไปราชการ",
+  teacherReasons?: Record<string, string>
+): string {
+  const fallback = (defaultReason || "ไปราชการ").trim() || "ไปราชการ";
+  if (absentTeachers.length <= 1) {
+    const singleId = absentTeachers[0]?.id;
+    return resolveTeacherReason(singleId, fallback, teacherReasons);
+  }
+  const distinctReasons = Array.from(
+    new Set(
+      absentTeachers.map((t) =>
+        resolveTeacherReason(t.id, fallback, teacherReasons)
+      )
+    )
+  );
+  if (distinctReasons.length === 1) {
+    return distinctReasons[0];
+  }
+  return absentTeachers
+    .map((t) => `${t.id} ${resolveTeacherReason(t.id, fallback, teacherReasons)}`)
+    .join(" / ")
+    .slice(0, 200);
+}
+
+/**
  * สร้างข้อมูลแถวสำหรับใบสอนแทน (ครู 1 ท่าน)
  */
 export function buildDocumentRows(
@@ -1321,11 +1370,18 @@ export function buildDocumentRows(
   dateStr: string,
   assignments: Record<string | number, string>,
   studentTeacherName: string,
-  includeSupervision = false
+  includeSupervision = false,
+  defaultReason = "ไปราชการ",
+  teacherReasons?: Record<string, string>
 ): SubstituteRow[] {
   const teacher = getTeacherById(absentTeacherId);
   const classes = getTeacherClasses(absentTeacherId, dateStr, includeSupervision);
   const shortDate = formatShortThaiDate(dateStr);
+  const rowNote = resolveTeacherReason(
+    teacher?.id ?? absentTeacherId,
+    defaultReason,
+    teacherReasons
+  );
   return classes.map((slot) => {
     const val = teacher
       ? getSlotAssignment(assignments, teacher.id, slot.p)
@@ -1350,19 +1406,23 @@ export function buildDocumentRows(
         teacher?.id
       ),
       shortDate,
+      note: rowNote,
     };
   });
 }
 
 /**
  * สร้างข้อมูลแถวรวมในตารางเดียวกันสำหรับครูที่ลา 1 หรือหลายท่านในวันเดียวกัน
+ * รองรับการกำหนดเหตุผลการลา (หมายเหตุ) แยกตามครูแต่ละท่านได้อย่างอิสระ
  */
 export function buildCombinedDocumentRows(
   teacherIds: (string | number)[],
   dateStr: string,
   assignments: Record<string | number, string>,
   studentTeacherName: string,
-  includeSupervision = false
+  includeSupervision = false,
+  defaultReason = "ไปราชการ",
+  teacherReasons?: Record<string, string>
 ): SubstituteRow[] {
   const combinedSlots = getCombinedTeacherClasses(teacherIds, dateStr, includeSupervision);
   const shortDate = formatShortThaiDate(dateStr);
@@ -1371,6 +1431,11 @@ export function buildCombinedDocumentRows(
     const sub = resolveSubstitute(val, studentTeacherName);
     const absentT = getTeacherById(slot.absentTeacherId);
     const specialty = absentT?.pdfGroup || slot.absentTeacherGroup;
+    const rowNote = resolveTeacherReason(
+      slot.absentTeacherId,
+      defaultReason,
+      teacherReasons
+    );
     return {
       p: slot.p + 1,
       tm: slot.tm,
@@ -1390,6 +1455,7 @@ export function buildCombinedDocumentRows(
         slot.absentTeacherId
       ),
       shortDate,
+      note: rowNote,
     };
   });
 }
@@ -2172,21 +2238,43 @@ export function formatLineNotificationMessage(
   absentTeachers: TeacherRecord[],
   dateStr: string,
   reason: string,
-  docRows: SubstituteRow[]
+  docRows: SubstituteRow[],
+  teacherReasons?: Record<string, string>
 ): string {
   const dayIdx = getDayIndex(dateStr);
   const dayLabel = dayIdx >= 0 ? `วัน${DAYS[dayIdx]}ที่ ` : "วันที่ ";
   const fullDate = formatThaiDate(dateStr);
   const cleanReason = (reason || "ไปราชการ").trim() || "ไปราชการ";
-  const absentNames =
-    absentTeachers.length > 0
-      ? absentTeachers.map((t) => t.n).join(", ")
-      : docRows[0]?.absentTeacherName || "-";
+
+  let absentSummaryLine = "";
+  if (absentTeachers.length > 1) {
+    const distinctReasons = Array.from(
+      new Set(
+        absentTeachers.map((t) =>
+          resolveTeacherReason(t.id, cleanReason, teacherReasons)
+        )
+      )
+    );
+    if (distinctReasons.length === 1) {
+      absentSummaryLine = `${absentTeachers.map((t) => t.n).join(", ")} (${distinctReasons[0]})`;
+    } else {
+      absentSummaryLine = absentTeachers
+        .map(
+          (t) => `${t.n} (${resolveTeacherReason(t.id, cleanReason, teacherReasons)})`
+        )
+        .join(", ");
+    }
+  } else if (absentTeachers.length === 1) {
+    const r = resolveTeacherReason(absentTeachers[0].id, cleanReason, teacherReasons);
+    absentSummaryLine = `${absentTeachers[0].n} (${r})`;
+  } else {
+    absentSummaryLine = `${docRows[0]?.absentTeacherName || "-"} (${docRows[0]?.note || cleanReason})`;
+  }
 
   const lines: string[] = [
     `📋 แจ้งจัดสอนแทน โรงเรียนวรคุณอุปถัมภ์`,
     `📅 ${dayLabel}${fullDate}`,
-    `👤 แทน: ${absentNames} (${cleanReason})`,
+    `👤 แทน: ${absentSummaryLine}`,
     `──────────────────`,
   ];
 
@@ -2195,9 +2283,12 @@ export function formatLineNotificationMessage(
     const roomClassDisplay = row.classRoomLabel || formatClassLevelLabel(row.cls);
     const subjectDisplay =
       row.subjectName || getSubjectNameFromCourse(row.code, row.g);
+    const rowReason =
+      row.note ||
+      resolveTeacherReason(row.absentTeacherId, cleanReason, teacherReasons);
     const multiTeacherSuffix =
       absentTeachers.length > 1 && row.absentTeacherName
-        ? ` [แทน ${row.absentTeacherName}]`
+        ? ` [แทน ${row.absentTeacherName} · ${rowReason}]`
         : "";
     lines.push(
       `• คาบ ${row.p} (${row.tm}) | ${roomClassDisplay} | ${row.code} ${subjectDisplay} ➡️ ${subDisplay}${multiTeacherSuffix}`

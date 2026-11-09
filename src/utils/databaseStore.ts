@@ -61,6 +61,7 @@ export interface SavedSubstituteRecord {
   absentTeacherGroup: string;
   selectedDate: string;
   reason: string;
+  teacherReasons?: Record<string, string>;
   studentTeacherName: string;
   includeSupervision: boolean;
   assignments: Record<string, string>;
@@ -71,6 +72,7 @@ export interface LivePlannerWorkspaceState {
   absentTeacherIds: string[];
   selectedDate: string;
   reason: string;
+  teacherReasons?: Record<string, string>;
   studentTeacherName: string;
   includeSupervision: boolean;
   assignments: Record<string, string>;
@@ -80,7 +82,8 @@ export interface LivePlannerWorkspaceState {
 export function encodeAssignments(
   assignments: Record<string, string>,
   absentTeacherIds?: string[],
-  clientWriteId?: string
+  clientWriteId?: string,
+  teacherReasons?: Record<string, string>
 ): string {
   const parts: string[] = [];
   if (absentTeacherIds && absentTeacherIds.length > 0) {
@@ -89,8 +92,17 @@ export function encodeAssignments(
   if (clientWriteId) {
     parts.push(`_c:${clientWriteId.replace(/[,:|]/g, "")}`);
   }
+  if (teacherReasons) {
+    Object.entries(teacherReasons).forEach(([tid, rVal]) => {
+      const cleanTid = String(tid || "").replace(/[^0-9]/g, "");
+      const cleanReason = String(rVal || "").trim();
+      if (cleanTid && cleanReason) {
+        parts.push(`_r_${cleanTid}:${encodeURIComponent(cleanReason.slice(0, 80))}`);
+      }
+    });
+  }
   Object.entries(assignments).forEach(([k, v]) => {
-    if (k !== "_t" && k !== "_c" && v) {
+    if (k !== "_t" && k !== "_c" && !k.startsWith("_r_") && v) {
       parts.push(`${k}:${v}`);
     }
   });
@@ -101,10 +113,12 @@ export function decodeAssignments(assignmentsJson: string): {
   assignments: Record<string, string>;
   absentTeacherIds?: string[];
   clientWriteId?: string;
+  teacherReasons?: Record<string, string>;
 } {
   const assignments: Record<string, string> = {};
   let absentTeacherIds: string[] | undefined;
   let clientWriteId: string | undefined;
+  const teacherReasons: Record<string, string> = {};
   if (!assignmentsJson) return { assignments };
   assignmentsJson.split(",").forEach((pair) => {
     const [k, v] = pair.split(":");
@@ -115,11 +129,26 @@ export function decodeAssignments(assignmentsJson: string): {
       absentTeacherIds = cleanVal.split("+").filter(Boolean);
     } else if (cleanKey === "_c") {
       clientWriteId = cleanVal;
+    } else if (cleanKey.startsWith("_r_")) {
+      const tid = cleanKey.slice(3).trim();
+      if (tid) {
+        try {
+          teacherReasons[tid] = decodeURIComponent(cleanVal);
+        } catch {
+          teacherReasons[tid] = cleanVal;
+        }
+      }
     } else {
       assignments[cleanKey] = cleanVal;
     }
   });
-  return { assignments, absentTeacherIds, clientWriteId };
+  return {
+    assignments,
+    absentTeacherIds,
+    clientWriteId,
+    teacherReasons:
+      Object.keys(teacherReasons).length > 0 ? teacherReasons : undefined,
+  };
 }
 
 /**
@@ -515,7 +544,8 @@ export async function saveLiveWorkspaceToCloud(
   const assignmentsJson = encodeAssignments(
     state.assignments,
     state.absentTeacherIds,
-    state.clientWriteId
+    state.clientWriteId,
+    state.teacherReasons
   );
 
   const path = `substitute_records/${LIVE_WORKSPACE_DOC_ID}`;
@@ -589,7 +619,9 @@ export async function upsertSubstituteRecordInDatabase(
   const docRef = doc(db, "substitute_records", cleanRecordId);
   const assignmentsJson = encodeAssignments(
     updatedItem.assignments,
-    updatedItem.absentTeacherIds
+    updatedItem.absentTeacherIds,
+    undefined,
+    updatedItem.teacherReasons
   );
 
   await enqueueCloudWrite(async () => {

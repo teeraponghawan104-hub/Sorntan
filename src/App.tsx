@@ -11,6 +11,7 @@ import {
   adjustDateToAcademicYear,
   autoAssignCombinedSubstitutes,
   buildCombinedTeacherHeader,
+  formatCombinedReasonsSummary,
   getInitialWeekdayDate,
   isTeacherExemptFromNeedingSubstitute,
   renameCourseCodesInTeachers,
@@ -75,12 +76,20 @@ export default function App() {
   const initialTeacherIds = rawInitialTeacherIds.length > 0 ? rawInitialTeacherIds : ["102"];
   const initialSelectedDate = initialSavedPlanner?.selectedDate || initialDate;
   const initialReason = initialSavedPlanner?.reason || "ไปราชการ";
+  const initialTeacherReasons: Record<string, string> =
+    initialSavedPlanner?.teacherReasons &&
+    Object.keys(initialSavedPlanner.teacherReasons).length > 0
+      ? initialSavedPlanner.teacherReasons
+      : Object.fromEntries(initialTeacherIds.map((id) => [String(id), initialReason]));
   const initialStudentTeacherName = initialSavedPlanner?.studentTeacherName || "";
   const initialIncludeSupervision = Boolean(initialSavedPlanner?.includeSupervision);
 
   const [absentTeacherIds, setAbsentTeacherIds] = useState<string[]>(initialTeacherIds);
   const [selectedDate, setSelectedDate] = useState<string>(initialSelectedDate);
   const [reason, setReason] = useState<string>(initialReason);
+  const [teacherReasons, setTeacherReasons] = useState<Record<string, string>>(
+    initialTeacherReasons
+  );
   const [studentTeacherName, setStudentTeacherName] = useState<string>(
     initialStudentTeacherName
   );
@@ -223,6 +232,7 @@ export default function App() {
             absentTeacherGroup: String(d.absentTeacherGroup || ""),
             selectedDate: String(d.selectedDate || ""),
             reason: String(d.reason || "ไปราชการ"),
+            teacherReasons: decoded.teacherReasons,
             studentTeacherName: String(d.studentTeacherName || ""),
             includeSupervision: Boolean(d.includeSupervision),
             assignments: decoded.assignments,
@@ -313,17 +323,23 @@ export default function App() {
     if (isTeacherExemptFromNeedingSubstitute(newId)) return;
     const rest = absentTeacherIds.slice(1).filter((id) => id !== newId);
     const nextIds = [newId, ...rest];
+    const nextReasons: Record<string, string> = {
+      ...teacherReasons,
+      [newId]: teacherReasons[newId] || reason || "ไปราชการ",
+    };
     const nextAssignments = autoAssignCombinedSubstitutes(
       nextIds,
       selectedDate,
       includeSupervision
     );
     setAbsentTeacherIds(nextIds);
+    setTeacherReasons(nextReasons);
     setAssignments(nextAssignments);
     saveLocalDraft({
       absentTeacherIds: nextIds,
       selectedDate,
       reason,
+      teacherReasons: nextReasons,
       studentTeacherName,
       includeSupervision,
       assignments: nextAssignments,
@@ -344,17 +360,28 @@ export default function App() {
     if (!targetId || isTeacherExemptFromNeedingSubstitute(targetId)) return;
 
     const nextIds = [...absentTeacherIds, targetId];
+    const nextReasons: Record<string, string> = { ...teacherReasons };
+    absentTeacherIds.forEach((id) => {
+      if (!nextReasons[id]) {
+        nextReasons[id] = reason || "ไปราชการ";
+      }
+    });
+    if (!nextReasons[targetId]) {
+      nextReasons[targetId] = reason || "ไปราชการ";
+    }
     const nextAssignments = autoAssignCombinedSubstitutes(
       nextIds,
       selectedDate,
       includeSupervision
     );
     setAbsentTeacherIds(nextIds);
+    setTeacherReasons(nextReasons);
     setAssignments(nextAssignments);
     saveLocalDraft({
       absentTeacherIds: nextIds,
       selectedDate,
       reason,
+      teacherReasons: nextReasons,
       studentTeacherName,
       includeSupervision,
       assignments: nextAssignments,
@@ -376,6 +403,7 @@ export default function App() {
       absentTeacherIds: nextIds,
       selectedDate,
       reason,
+      teacherReasons,
       studentTeacherName,
       includeSupervision,
       assignments: nextAssignments,
@@ -395,19 +423,52 @@ export default function App() {
       absentTeacherIds,
       selectedDate: newDate,
       reason,
+      teacherReasons,
       studentTeacherName,
       includeSupervision,
       assignments: nextAssignments,
     });
   };
 
-  // เปลี่ยนเหตุผล / ภารกิจ
+  // เปลี่ยนเหตุผล / ภารกิจ (สำหรับกรณีครูคนเดียว หรือกดปุ่มตั้งให้เหมือนกันทุกคน)
   const handleReasonChange = (newReason: string) => {
+    const nextReasons: Record<string, string> = { ...teacherReasons };
+    absentTeacherIds.forEach((id) => {
+      nextReasons[String(id)] = newReason;
+    });
     setReason(newReason);
+    setTeacherReasons(nextReasons);
     saveLocalDraft({
       absentTeacherIds,
       selectedDate,
       reason: newReason,
+      teacherReasons: nextReasons,
+      studentTeacherName,
+      includeSupervision,
+      assignments,
+    });
+  };
+
+  // เปลี่ยนเหตุผลการลารายบุคคล (กรณีมีครูลาหลายท่านและเหตุผลไม่เหมือนกัน)
+  const handleTeacherReasonChange = (teacherId: string, newReason: string) => {
+    const key = String(teacherId);
+    const nextReasons: Record<string, string> = {
+      ...teacherReasons,
+      [key]: newReason,
+    };
+    setTeacherReasons(nextReasons);
+    const nextDefaultReason =
+      absentTeacherIds.length === 1 && String(absentTeacherIds[0]) === key
+        ? newReason
+        : reason;
+    if (nextDefaultReason !== reason) {
+      setReason(nextDefaultReason);
+    }
+    saveLocalDraft({
+      absentTeacherIds,
+      selectedDate,
+      reason: nextDefaultReason,
+      teacherReasons: nextReasons,
       studentTeacherName,
       includeSupervision,
       assignments,
@@ -421,6 +482,7 @@ export default function App() {
       absentTeacherIds,
       selectedDate,
       reason,
+      teacherReasons,
       studentTeacherName: newName,
       includeSupervision,
       assignments,
@@ -440,6 +502,7 @@ export default function App() {
       absentTeacherIds,
       selectedDate,
       reason,
+      teacherReasons,
       studentTeacherName,
       includeSupervision: inc,
       assignments: nextAssignments,
@@ -458,6 +521,7 @@ export default function App() {
       absentTeacherIds,
       selectedDate,
       reason,
+      teacherReasons,
       studentTeacherName,
       includeSupervision,
       assignments: nextAssignments,
@@ -482,6 +546,7 @@ export default function App() {
       absentTeacherIds,
       selectedDate,
       reason,
+      teacherReasons,
       studentTeacherName,
       includeSupervision,
       assignments: next,
@@ -500,18 +565,24 @@ export default function App() {
     const effectiveTeacherId = teacherId === 302 ? 305 : teacherId;
     const idStr = String(effectiveTeacherId);
     const nextIds = [idStr];
+    const nextReasons: Record<string, string> = {
+      ...teacherReasons,
+      [idStr]: teacherReasons[idStr] || reason || "ไปราชการ",
+    };
     const nextAssignments = autoAssignCombinedSubstitutes(
       nextIds,
       selectedDate,
       includeSupervision
     );
     setAbsentTeacherIds(nextIds);
+    setTeacherReasons(nextReasons);
     setAssignments(nextAssignments);
     setActiveTab("planner");
     saveLocalDraft({
       absentTeacherIds: nextIds,
       selectedDate,
       reason,
+      teacherReasons: nextReasons,
       studentTeacherName,
       includeSupervision,
       assignments: nextAssignments,
@@ -568,6 +639,14 @@ export default function App() {
     if (!combinedHeader) return;
     const idsPart = absentTeacherIds.join("-");
     const recordId = `rec_${idsPart}_${selectedDate.replace(/[^0-9]/g, "")}`;
+    const selectedTeachersForSummary = absentTeacherIds
+      .map((id) => teachers.find((t) => String(t.id) === String(id)))
+      .filter((t): t is TeacherRecord => Boolean(t));
+    const combinedReasonSummary = formatCombinedReasonsSummary(
+      selectedTeachersForSummary,
+      reason,
+      teacherReasons
+    );
     const updatedRecords = await upsertSubstituteRecordInDatabase(
       {
         recordId,
@@ -576,7 +655,8 @@ export default function App() {
         absentTeacherName: combinedHeader.n,
         absentTeacherGroup: combinedHeader.pdfGroup,
         selectedDate,
-        reason,
+        reason: combinedReasonSummary,
+        teacherReasons: { ...teacherReasons },
         studentTeacherName,
         includeSupervision,
         assignments,
@@ -593,9 +673,14 @@ export default function App() {
         ? record.absentTeacherIds
         : [String(record.absentTeacherId)];
     const loadedAssignments = { ...record.assignments };
+    const loadedReasons: Record<string, string> =
+      record.teacherReasons && Object.keys(record.teacherReasons).length > 0
+        ? { ...record.teacherReasons }
+        : Object.fromEntries(loadedIds.map((id) => [String(id), record.reason || "ไปราชการ"]));
     setAbsentTeacherIds(loadedIds);
     setSelectedDate(record.selectedDate);
     setReason(record.reason);
+    setTeacherReasons(loadedReasons);
     setStudentTeacherName(record.studentTeacherName);
     setIncludeSupervision(record.includeSupervision);
     setAssignments(loadedAssignments);
@@ -604,6 +689,7 @@ export default function App() {
       absentTeacherIds: loadedIds,
       selectedDate: record.selectedDate,
       reason: record.reason,
+      teacherReasons: loadedReasons,
       studentTeacherName: record.studentTeacherName,
       includeSupervision: record.includeSupervision,
       assignments: loadedAssignments,
@@ -690,6 +776,7 @@ export default function App() {
         absentTeacherIds,
         selectedDate: nextDate,
         reason,
+        teacherReasons,
         studentTeacherName,
         includeSupervision,
         assignments: nextAssignments,
@@ -724,6 +811,8 @@ export default function App() {
             onChangeDate={handleDateChange}
             reason={reason}
             onChangeReason={handleReasonChange}
+            teacherReasons={teacherReasons}
+            onChangeTeacherReason={handleTeacherReasonChange}
             studentTeacherName={studentTeacherName}
             onChangeStudentTeacherName={handleStudentTeacherNameChange}
             assignments={assignments}

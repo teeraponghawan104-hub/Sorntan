@@ -845,3 +845,81 @@ test("LINE notification formatter, substitute workload statistics, and dynamic s
   // Reset signatories back to default
   setRuntimeDocumentSignatories(DEFAULT_DOCUMENT_SIGNATORIES);
 });
+
+test("Per-teacher individual leave reasons (ไปราชการ, ลากิจ, ลาป่วย, custom text) work across combined document rows, Word export, LINE notification, and database encoding", async () => {
+  const {
+    formatLineNotificationMessage,
+    formatCombinedReasonsSummary,
+    resolveTeacherReason,
+  } = await import("./scheduler");
+  const { generateDocxBlob } = await import("./exportDoc");
+  const { encodeAssignments, decodeAssignments } = await import("./databaseStore");
+  const JSZip = (await import("jszip")).default;
+
+  const teacherIds = ["102", "201", "301"];
+  const dateStr = "2026-11-02"; // Monday
+  const teacherReasons: Record<string, string> = {
+    "102": "ไปราชการ",
+    "201": "ลากิจ",
+    "301": "ลาป่วยพบแพทย์",
+  };
+
+  assert.equal(resolveTeacherReason(102, "ไปราชการ", teacherReasons), "ไปราชการ");
+  assert.equal(resolveTeacherReason(201, "ไปราชการ", teacherReasons), "ลากิจ");
+  assert.equal(resolveTeacherReason(301, "ไปราชการ", teacherReasons), "ลาป่วยพบแพทย์");
+
+  const selectedTeachers = teacherIds.map((id) => TEACHERS.find((t) => String(t.id) === id)!);
+  const summary = formatCombinedReasonsSummary(selectedTeachers, "ไปราชการ", teacherReasons);
+  assert.equal(summary, "102 ไปราชการ / 201 ลากิจ / 301 ลาป่วยพบแพทย์");
+
+  const asg = autoAssignCombinedSubstitutes(teacherIds, dateStr);
+  const rows = buildCombinedDocumentRows(
+    teacherIds,
+    dateStr,
+    asg,
+    "",
+    false,
+    "ไปราชการ",
+    teacherReasons
+  );
+  assert.ok(rows.length > 0);
+
+  for (const row of rows) {
+    if (row.absentTeacherId === 102) {
+      assert.equal(row.note, "ไปราชการ");
+    } else if (row.absentTeacherId === 201) {
+      assert.equal(row.note, "ลากิจ");
+    } else if (row.absentTeacherId === 301) {
+      assert.equal(row.note, "ลาป่วยพบแพทย์");
+    }
+  }
+
+  // Verify LINE notification shows each teacher's individual reason
+  const lineMsg = formatLineNotificationMessage(
+    selectedTeachers,
+    dateStr,
+    "ไปราชการ",
+    rows,
+    teacherReasons
+  );
+  assert.ok(lineMsg.includes("ครูรติพงษ์ รักษาพันธุ์ (ไปราชการ)"));
+  assert.ok(lineMsg.includes("ครูอำมาลา เกตษา (ลากิจ)"));
+  assert.ok(lineMsg.includes("ครูเมธาวี สายสิน (ลาป่วยพบแพทย์)"));
+
+  // Verify Word (.docx) export embeds all individual reasons in Column 10 (หมายเหตุ)
+  const combinedHeader = buildCombinedTeacherHeader(teacherIds)!;
+  const blob = await generateDocxBlob(combinedHeader, dateStr, "ไปราชการ", rows);
+  const buf = Buffer.from(await blob.arrayBuffer());
+  const zip = await JSZip.loadAsync(buf);
+  const docXml = await zip.file("word/document.xml")!.async("string");
+  assert.ok(docXml.includes("ไปราชการ"));
+  assert.ok(docXml.includes("ลากิจ"));
+  assert.ok(docXml.includes("ลาป่วยพบแพทย์"));
+
+  // Verify encodeAssignments / decodeAssignments round-trips teacherReasons cleanly
+  const encoded = encodeAssignments(asg, teacherIds, undefined, teacherReasons);
+  const decoded = decodeAssignments(encoded);
+  assert.deepEqual(decoded.absentTeacherIds, teacherIds);
+  assert.deepEqual(decoded.teacherReasons, teacherReasons);
+});
+

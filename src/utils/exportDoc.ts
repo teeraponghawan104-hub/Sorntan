@@ -634,6 +634,7 @@ export async function renderPaperPageCanvas(
     const subjectDisplay =
       row.subjectName || getSubjectNameFromCourse(row.code, absentTeacher.g);
     const rowShortDate = row.shortDate || shortDateStr;
+    const rowNote = (row.note || noteStr).trim() || noteStr;
 
     const cellValues = [
       String(globalRowNumber),
@@ -645,7 +646,7 @@ export async function renderPaperPageCanvas(
       row.code,
       rowShortDate,
       "",
-      noteStr,
+      rowNote,
     ];
 
     let x = marginX;
@@ -1065,6 +1066,7 @@ function buildDocxSheetBodyXml(
         const subjectDisplay =
           row.subjectName || getSubjectNameFromCourse(row.code, absentTeacher.g);
         const rowShortDate = row.shortDate || shortDateStr;
+        const rowNote = (row.note || noteStr).trim() || noteStr;
         const vals = [
           String(globalRowIdx),
           subDisplay,
@@ -1075,7 +1077,7 @@ function buildDocxSheetBodyXml(
           row.code,
           rowShortDate,
           "",
-          noteStr,
+          rowNote,
         ];
         return `<w:tr><w:trPr><w:cantSplit/><w:trHeight w:val="${dataRowHeightDxa}" w:hRule="atLeast"/></w:trPr>${vals
           .map((v, i) => C(String(v), i))
