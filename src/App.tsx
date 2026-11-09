@@ -8,16 +8,21 @@ import { DatabaseManagerView } from "./components/DatabaseManagerView";
 import { TeacherEditorModal } from "./components/TeacherEditorModal";
 import { INITIAL_TEACHERS, TeacherRecord } from "./data/teachers";
 import {
+  LeavePeriodMode,
   adjustDateToAcademicYear,
+  applyPartialDayLeaveFilter,
   autoAssignCombinedSubstitutes,
   buildCombinedTeacherHeader,
+  computeCumulativeSubCountsExcludingDate,
   extractSubjectNamesFromCoursesSummary,
   formatCombinedReasonsSummary,
   getInitialWeekdayDate,
   getSubjectNameFromCourse,
   isTeacherExemptFromNeedingSubstitute,
+  mergeSubstituteWorkspaceWithRecord,
   reconcileCombinedSubstitutes,
   renameCourseCodesInTeachers,
+  setRuntimeCumulativeSubCounts,
   syncCoursesSummaryWithSubjectMappings,
 } from "./utils/scheduler";
 import { OperationType, db, handleFirestoreError } from "./firebase";
@@ -144,6 +149,11 @@ export default function App() {
 
   const [focusTimetableTeacherIds, setFocusTimetableTeacherIds] = useState<number[]>(
     []
+  );
+
+  // อัปเดตสถิติจำนวนคาบสอนแทนสะสมของครูแต่ละท่าน (ไม่นับวันที่กำลังเปิดแก้ไขอยู่) เพื่อให้ระบบจัดอัตโนมัติเกลี่ยภาระงานอย่างเป็นธรรม
+  setRuntimeCumulativeSubCounts(
+    computeCumulativeSubCountsExcludingDate(savedRecords, selectedDate)
   );
 
   useEffect(() => {
@@ -631,6 +641,75 @@ export default function App() {
     });
   };
 
+  // ปรับช่วงเวลาการลา (ลาเต็มวัน / ลาครึ่งเช้า คาบ 1-4 / ลาครึ่งบ่าย คาบ 5-7)
+  const handleApplyLeavePeriodMode = (
+    mode: LeavePeriodMode,
+    targetTeacherId?: number | string
+  ) => {
+    const nextAssignments = applyPartialDayLeaveFilter(
+      absentTeacherIds,
+      selectedDate,
+      assignments,
+      mode,
+      targetTeacherId,
+      includeSupervision
+    );
+    setAssignments(nextAssignments);
+    saveLocalDraft({
+      absentTeacherIds,
+      selectedDate,
+      reason,
+      teacherReasons,
+      studentTeacherName,
+      includeSupervision,
+      assignments: nextAssignments,
+    });
+  };
+
+  // แก้ไขกรณีผู้ใช้เลือกครูสอนแทนชนกันในคาบเดียวกันด้วยมือ ให้ระบบจัดคนไม่ชนกันให้อัตโนมัติ
+  const handleResolveDoubleBooking = () => {
+    const nextAssignments = reconcileCombinedSubstitutes(
+      absentTeacherIds,
+      selectedDate,
+      assignments,
+      includeSupervision
+    );
+    setAssignments(nextAssignments);
+    saveLocalDraft({
+      absentTeacherIds,
+      selectedDate,
+      reason,
+      teacherReasons,
+      studentTeacherName,
+      includeSupervision,
+      assignments: nextAssignments,
+    });
+  };
+
+  // รวมรายชื่อครูที่ลาจากใบที่เคยบันทึกไว้ในวันเดียวกันเข้ากับหน้าจอปัจจุบัน
+  const handleMergeSavedRecord = (record: SavedSubstituteRecord) => {
+    const merged = mergeSubstituteWorkspaceWithRecord(
+      absentTeacherIds,
+      teacherReasons,
+      assignments,
+      record,
+      selectedDate,
+      includeSupervision
+    );
+    setAbsentTeacherIds(merged.absentTeacherIds);
+    setTeacherReasons(merged.teacherReasons);
+    setAssignments(merged.assignments);
+    saveLocalDraft({
+      absentTeacherIds: merged.absentTeacherIds,
+      selectedDate,
+      reason,
+      teacherReasons: merged.teacherReasons,
+      studentTeacherName,
+      includeSupervision,
+      assignments: merged.assignments,
+    });
+  };
+
   const handleViewTeacherTimetable = (teacherIdOrIds: number | number[]) => {
     const ids = (Array.isArray(teacherIdOrIds) ? teacherIdOrIds : [teacherIdOrIds])
       .map(Number)
@@ -1012,6 +1091,9 @@ export default function App() {
             onChangeStudentTeacherName={handleStudentTeacherNameChange}
             assignments={assignments}
             onChangeAssignment={handleAssignmentChange}
+            onApplyLeavePeriodMode={handleApplyLeavePeriodMode}
+            onResolveDoubleBooking={handleResolveDoubleBooking}
+            onMergeSavedRecord={handleMergeSavedRecord}
             onResetAutoAssign={handleResetAutoAssign}
             includeSupervision={includeSupervision}
             onChangeIncludeSupervision={handleIncludeSupervisionChange}

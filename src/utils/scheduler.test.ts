@@ -1116,6 +1116,159 @@ test("Two-way linking: summarizeTeacherGrid, formatLinkedCourseSummaryLine, sync
   }
 });
 
+test("Five school-administration enhancements: partial-day leave (skip), cumulative workload balancing, double-booking detection, schedule cell validator/auto-fix, and same-date record merging", async () => {
+  const {
+    applyPartialDayLeaveFilter,
+    detectLeavePeriodMode,
+    computeCumulativeSubCountsExcludingDate,
+    setRuntimeCumulativeSubCounts,
+    findDoubleBookedSubstitutes,
+    validateTeacherScheduleGrid,
+    autoFixScheduleCellFormat,
+    autoFixScheduleGridFormat,
+    mergeSubstituteWorkspaceWithRecord,
+    computeSubstituteStatistics,
+    reconcileCombinedSubstitutes,
+  } = await import("./scheduler");
+
+  try {
+    // 1. Partial-Day Leave (Morning / Afternoon / Skip)
+    // Teacher 102 on Wednesday (2026-11-04) has Morning P1 (p=0), P2 (p=1) and Afternoon P5 (p=4), P6 (p=5)
+    const fullAsg = autoAssignCombinedSubstitutes([102], "2026-11-04");
+    assert.equal(detectLeavePeriodMode([102], "2026-11-04", fullAsg), "full");
+
+    const morningAsg = applyPartialDayLeaveFilter([102], "2026-11-04", fullAsg, "morning");
+    assert.equal(detectLeavePeriodMode([102], "2026-11-04", morningAsg), "morning");
+    assert.equal(morningAsg["102_4"], "skip", "Afternoon period P5 (p=4) should be skipped for morning leave");
+    assert.equal(morningAsg["102_5"], "skip", "Afternoon period P6 (p=5) should be skipped for morning leave");
+    const morningRows = buildCombinedDocumentRows([102], "2026-11-04", morningAsg, "");
+    assert.equal(morningRows.length, 2, "Only the 2 morning periods should appear on the substitute document");
+    assert.deepEqual(morningRows.map((r) => r.p), [1, 2]);
+
+    const afternoonAsg = applyPartialDayLeaveFilter([102], "2026-11-04", morningAsg, "afternoon");
+    assert.equal(detectLeavePeriodMode([102], "2026-11-04", afternoonAsg), "afternoon");
+    assert.equal(afternoonAsg["102_0"], "skip");
+    assert.equal(afternoonAsg["102_1"], "skip");
+    assert.notEqual(afternoonAsg["102_4"], "skip");
+    assert.notEqual(afternoonAsg["102_5"], "skip");
+    const afternoonRows = buildCombinedDocumentRows([102], "2026-11-04", afternoonAsg, "");
+    assert.equal(afternoonRows.length, 2);
+    assert.deepEqual(afternoonRows.map((r) => r.p), [5, 6]);
+
+    // Statistics should not count "skip" periods as absent or substituted
+    const statsWithSkip = computeSubstituteStatistics([
+      {
+        recordId: "r_half",
+        absentTeacherId: 102,
+        absentTeacherIds: ["102"],
+        absentTeacherName: "ครูรติพงษ์ รักษาพันธุ์",
+        selectedDate: "2026-11-04",
+        reason: "ลากิจครึ่งบ่าย",
+        studentTeacherName: "",
+        includeSupervision: false,
+        assignments: afternoonAsg,
+      },
+    ]);
+    assert.equal(statsWithSkip.byTeacherId[102].absentPeriods, 2, "Only 2 non-skipped afternoon periods should count as absent");
+    assert.equal(statsWithSkip.totalSubstitutedPeriods, 2);
+
+    // 2. Cumulative Workload Balancing across days
+    const candsDefault = getCandidateTeachers(102, "2026-11-02", 0);
+    const firstCandDefault = candsDefault[0];
+    // Give the default #1 candidate 10 historical substitute periods on an earlier date
+    const historicalCounts = computeCumulativeSubCountsExcludingDate(
+      [
+        {
+          recordId: "r_prev",
+          absentTeacherId: 102,
+          absentTeacherName: "ครูศิริพร",
+          selectedDate: "2026-10-26",
+          reason: "ไปราชการ",
+          studentTeacherName: "",
+          includeSupervision: false,
+          assignments: {
+            "102_0": `t${firstCandDefault.id}`,
+            "102_1": `t${firstCandDefault.id}`,
+            "102_4": `t${firstCandDefault.id}`,
+          },
+        },
+      ],
+      "2026-11-02"
+    );
+    assert.equal(historicalCounts[firstCandDefault.id], 3);
+    setRuntimeCumulativeSubCounts({ [firstCandDefault.id]: 10 });
+    const asgBalanced = autoAssignCombinedSubstitutes([102], "2026-11-02");
+    assert.ok(asgBalanced["102_0"].startsWith("t"));
+    setRuntimeCumulativeSubCounts({});
+
+    // 3. Double-Booking Detection & Resolution
+    const multiSlots = getCombinedTeacherClasses([102, 103], "2026-11-02");
+    const conflictAsg: Record<string, string> = {
+      ...autoAssignCombinedSubstitutes([102, 103], "2026-11-02"),
+      "102_1": "t201",
+      "103_1": "t201", // Intentional manual double-booking in Period 2 (p=1)
+    };
+    const conflicts = findDoubleBookedSubstitutes(multiSlots, conflictAsg);
+    assert.equal(conflicts.length, 1);
+    assert.equal(conflicts[0].periodNumber, 2);
+    assert.equal(conflicts[0].substituteTeacherId, 201);
+
+    const fixedConflictAsg = reconcileCombinedSubstitutes([102, 103], "2026-11-02", conflictAsg);
+    const conflictsAfterFix = findDoubleBookedSubstitutes(multiSlots, fixedConflictAsg);
+    assert.equal(conflictsAfterFix.length, 0, "reconcileCombinedSubstitutes resolves double-booking automatically");
+
+    // 4. Smart Schedule Cell Validator & Auto-Fix
+    assert.equal(autoFixScheduleCellFormat("ว211021/1"), "ว21102 1/1");
+    assert.equal(autoFixScheduleCellFormat("ท31102 ม.4/1 @ 138"), "ท31102 4/1@138");
+
+    const sampleBadGrid = [
+      ["ว211021/1", "ว21102", "ว21102 121", "", "", "", "#ชุมนุม"],
+      ["", "", "", "", "", "", "#ฐาน ศก."],
+      ["", "", "", "", "", "", "#กิจกรรม"],
+      ["#โฮมรูม", "", "", "", "", "", "#การป้องกันทุจริต"],
+      ["", "", "", "", "", "", "#แนะแนว"],
+    ];
+    const issues = validateTeacherScheduleGrid(sampleBadGrid);
+    assert.equal(issues.length, 3);
+    assert.equal(issues[0].suggestedValue, "ว21102 1/1");
+    assert.ok(issues[1].message.includes("ยังไม่ได้ระบุชั้นเรียน"));
+    assert.ok(issues[2].message.includes("เลขห้องเรียน 3 หลัก"));
+
+    const { grid: autoFixedGrid, fixedCount } = autoFixScheduleGridFormat(sampleBadGrid);
+    assert.equal(fixedCount, 1);
+    assert.equal(autoFixedGrid[0][0], "ว21102 1/1");
+
+    // 5. Same-Date Saved Record Merging
+    const merged = mergeSubstituteWorkspaceWithRecord(
+      ["201"],
+      { "201": "ลาป่วย" },
+      autoAssignCombinedSubstitutes(["201"], "2026-11-02"),
+      {
+        recordId: "rec_102_20261102",
+        absentTeacherId: 102,
+        absentTeacherIds: ["102"],
+        absentTeacherName: "ครูศิริพร วงษ์คำจันทร์",
+        selectedDate: "2026-11-02",
+        reason: "ไปราชการ",
+        teacherReasons: { "102": "ไปราชการ" },
+        studentTeacherName: "",
+        includeSupervision: false,
+        assignments: autoAssignCombinedSubstitutes(["102"], "2026-11-02"),
+      },
+      "2026-11-02"
+    );
+    assert.deepEqual(merged.absentTeacherIds, ["102", "201"]);
+    assert.equal(merged.teacherReasons["102"], "ไปราชการ");
+    assert.equal(merged.teacherReasons["201"], "ลาป่วย");
+    const mergedSlots = getCombinedTeacherClasses(merged.absentTeacherIds, "2026-11-02");
+    assert.equal(findDoubleBookedSubstitutes(mergedSlots, merged.assignments).length, 0);
+  } finally {
+    setRuntimeCumulativeSubCounts({});
+    setRuntimeTeachers(INITIAL_TEACHERS);
+  }
+});
+
+
 
 
 

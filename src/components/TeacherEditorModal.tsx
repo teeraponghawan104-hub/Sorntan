@@ -1,7 +1,11 @@
-import React, { useState } from "react";
-import { X, Save, Plus, Trash2, Wand2, RotateCcw } from "lucide-react";
+import React, { useMemo, useState } from "react";
+import { X, Save, Plus, Wand2, RotateCcw, AlertTriangle, Check } from "lucide-react";
 import { DAYS, PERIOD_TIMES, TeacherRecord } from "../data/teachers";
-import { summarizeTeacherGrid } from "../utils/scheduler";
+import {
+  autoFixScheduleGridFormat,
+  summarizeTeacherGrid,
+  validateTeacherScheduleGrid,
+} from "../utils/scheduler";
 
 interface TeacherEditorModalProps {
   initialTeacher: TeacherRecord | null; // null = เพิ่มครูใหม่
@@ -91,6 +95,30 @@ export const TeacherEditorModal: React.FC<TeacherEditorModalProps> = ({
   );
   const [errorMsg, setErrorMsg] = useState<string>("");
   const [saving, setSaving] = useState<boolean>(false);
+
+  const scheduleIssues = useMemo(
+    () => validateTeacherScheduleGrid(grid),
+    [grid]
+  );
+  const issueByCellKey = useMemo(() => {
+    const map = new Map<string, (typeof scheduleIssues)[number]>();
+    scheduleIssues.forEach((iss) => {
+      map.set(`${iss.dayIndex}_${iss.periodIndex}`, iss);
+    });
+    return map;
+  }, [scheduleIssues]);
+  const hasAutoFixableIssues = useMemo(
+    () => scheduleIssues.some((iss) => Boolean(iss.suggestedValue)),
+    [scheduleIssues]
+  );
+
+  const handleAutoFixGridFormat = () => {
+    const { grid: fixedGrid, fixedCount } = autoFixScheduleGridFormat(grid);
+    if (fixedCount > 0) {
+      setGrid(fixedGrid);
+      syncSummaryWithGrid(fixedGrid, room);
+    }
+  };
 
   const syncSummaryWithGrid = (
     nextGrid: string[][],
@@ -194,7 +222,8 @@ export const TeacherEditorModal: React.FC<TeacherEditorModalProps> = ({
       return;
     }
 
-    const cleanGrid = grid.map((row) =>
+    const { grid: autoCleanedGrid } = autoFixScheduleGridFormat(grid);
+    const cleanGrid = autoCleanedGrid.map((row) =>
       row.map((c) => String(c || "").replace(/[|,]/g, " ").trim())
     );
     const s = cleanGrid.map((row) => row.join(",")).join("|");
@@ -456,6 +485,58 @@ export const TeacherEditorModal: React.FC<TeacherEditorModalProps> = ({
               ))}
             </div>
 
+            {/* แจ้งเตือนตรวจสอบรูปแบบข้อความในช่องตารางสอน 5x7 แบบเรียลไทม์ */}
+            {scheduleIssues.length > 0 && (
+              <div className="mb-3 p-2.5 rounded-lg bg-amber-50 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-700 text-xs space-y-1.5">
+                <div className="flex items-center justify-between gap-2 flex-wrap">
+                  <div className="flex items-center gap-1.5 font-bold text-amber-900 dark:text-amber-200">
+                    <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
+                    <span>
+                      พบช่องตารางสอนที่อาจพิมพ์ผิดรูปแบบ ({scheduleIssues.length} ช่อง):
+                    </span>
+                  </div>
+                  {hasAutoFixableIssues && (
+                    <button
+                      type="button"
+                      onClick={handleAutoFixGridFormat}
+                      className="flex items-center gap-1 px-2.5 py-1 rounded-md bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs cursor-pointer shadow-2xs"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                      <span>จัดรูปแบบให้ถูกต้องอัตโนมัติ</span>
+                    </button>
+                  )}
+                </div>
+                <div className="space-y-1 pl-5 text-amber-800 dark:text-amber-300">
+                  {scheduleIssues.map((iss) => (
+                    <div
+                      key={`${iss.dayIndex}_${iss.periodIndex}`}
+                      className="flex items-center justify-between gap-2 flex-wrap"
+                    >
+                      <span>
+                        • <b>วัน{iss.dayName} คาบ {iss.periodNumber}</b> (<code>{iss.rawValue}</code>):{" "}
+                        {iss.message}
+                      </span>
+                      {iss.suggestedValue && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleCellChange(
+                              iss.dayIndex,
+                              iss.periodIndex,
+                              iss.suggestedValue || iss.rawValue
+                            )
+                          }
+                          className="px-2 py-0.5 rounded bg-white dark:bg-[#14204a] border border-amber-400 dark:border-amber-700 text-amber-900 dark:text-amber-200 font-semibold hover:bg-amber-100 cursor-pointer"
+                        >
+                          แก้เป็น &ldquo;{iss.suggestedValue}&rdquo;
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div className="overflow-x-auto">
               <table className="w-full min-w-[720px] border-collapse text-xs">
                 <thead>
@@ -486,11 +567,16 @@ export const TeacherEditorModal: React.FC<TeacherEditorModalProps> = ({
                         const isInitialTarget =
                           initialActiveCell?.day === dIdx &&
                           initialActiveCell?.period === pIdx;
+                        const cellIssue = issueByCellKey.get(`${dIdx}_${pIdx}`);
                         return (
                           <td
                             key={pIdx}
                             className={`border border-[#c9d4ec] dark:border-[#2a3a6e] p-1 ${
-                              isFocused ? "ring-2 ring-[#f2c230] bg-amber-50/30" : ""
+                              isFocused
+                                ? "ring-2 ring-[#f2c230] bg-amber-50/30"
+                                : cellIssue
+                                ? "bg-amber-100/70 dark:bg-amber-950/50"
+                                : ""
                             }`}
                           >
                             <input
@@ -501,8 +587,13 @@ export const TeacherEditorModal: React.FC<TeacherEditorModalProps> = ({
                               onChange={(e) => handleCellChange(dIdx, pIdx, e.target.value)}
                               onPaste={(e) => handleCellPaste(e, dIdx, pIdx)}
                               placeholder="ว่าง"
+                              title={cellIssue ? cellIssue.message : undefined}
                               aria-label={`วัน${dayName} คาบที่ ${pIdx + 1}`}
-                              className="w-full px-1.5 py-1 rounded bg-white dark:bg-[#0b1330] text-[#0f2150] dark:text-[#e9eefc] text-xs border border-transparent focus:border-[#1b4fb8] focus:outline-none"
+                              className={`w-full px-1.5 py-1 rounded bg-white dark:bg-[#0b1330] text-[#0f2150] dark:text-[#e9eefc] text-xs border focus:outline-none ${
+                                cellIssue
+                                  ? "border-amber-500 dark:border-amber-500 text-amber-900 dark:text-amber-200 font-semibold"
+                                  : "border-transparent focus:border-[#1b4fb8]"
+                              }`}
                             />
                           </td>
                         );

@@ -778,6 +778,9 @@ export function getCandidateTeachers(
     if (n.exactClass !== m.exactClass) return n.exactClass - m.exactClass;
     if (n.sameGroupNum !== m.sameGroupNum) return n.sameGroupNum - m.sameGroupNum;
     if (n.sameSubNum !== m.sameSubNum) return n.sameSubNum - m.sameSubNum;
+    const mCum = RUNTIME_CUMULATIVE_SUB_COUNTS[m.u.id] || 0;
+    const nCum = RUNTIME_CUMULATIVE_SUB_COUNTS[n.u.id] || 0;
+    if (mCum !== nCum) return mCum - nCum;
     return m.u.id - n.u.id;
   });
 
@@ -813,6 +816,10 @@ function pickBestSubstituteForSlot(
     const mSub = m.pdfGroup === absentPdfGroup ? 1 : 0;
     const nSub = n.pdfGroup === absentPdfGroup ? 1 : 0;
     if (nSub !== mSub) return nSub - mSub;
+
+    const mCum = RUNTIME_CUMULATIVE_SUB_COUNTS[m.id] || 0;
+    const nCum = RUNTIME_CUMULATIVE_SUB_COUNTS[n.id] || 0;
+    if (mCum !== nCum) return mCum - nCum;
 
     return m.id - n.id;
   };
@@ -1060,7 +1067,7 @@ export function reconcileCombinedSubstitutes(
       (allAbsentIds.length === 1 ? currentAssignments[String(slot.p)] : "");
     if (!existingVal) return;
 
-    if (existingVal === "st") {
+    if (existingVal === "st" || existingVal === "skip") {
       assignments[slot.slotKey] = existingVal;
       if (allAbsentIds.length === 1) assignments[String(slot.p)] = existingVal;
       return;
@@ -1417,6 +1424,20 @@ export const KNOWN_COURSE_SUBJECTS: Record<string, string> = {
 
 export let CUSTOM_SUBJECT_MAPPINGS: Record<string, string> = {};
 
+let RUNTIME_CUMULATIVE_SUB_COUNTS: Record<number, number> = {};
+
+/**
+ * กำหนดจำนวนคาบที่ครูแต่ละท่านเคยช่วยสอนแทนสะสม (จากประวัติที่บันทึกไว้)
+ * เพื่อให้ระบบจัดอัตโนมัติเกลี่ยภาระงานให้ครูที่ยังไม่ค่อยได้สอนแทนก่อน
+ */
+export function setRuntimeCumulativeSubCounts(counts: Record<number, number>): void {
+  RUNTIME_CUMULATIVE_SUB_COUNTS = { ...counts };
+}
+
+export function getRuntimeCumulativeSubCounts(): Record<number, number> {
+  return { ...RUNTIME_CUMULATIVE_SUB_COUNTS };
+}
+
 /**
  * กำหนดค่าชื่อวิชาตามรหัสวิชาแบบกำหนดเอง (Custom Overrides)
  */
@@ -1647,38 +1668,46 @@ export function buildDocumentRows(
     defaultReason,
     teacherReasons
   );
-  return classes.map((slot) => {
-    const val = teacher
-      ? getSlotAssignment(assignments, teacher.id, slot.p)
-      : assignments[slot.p];
-    const sub = resolveSubstitute(val, studentTeacherName);
-    return {
-      p: slot.p + 1,
-      tm: slot.tm,
-      code: slot.code,
-      cls: slot.cls,
-      room: slot.room,
-      n: sub.n,
-      g: sub.g,
-      slotKey: teacher ? `${teacher.id}_${slot.p}` : String(slot.p),
-      absentTeacherId: teacher?.id,
-      absentTeacherName: teacher?.n,
-      subName: formatCleanSubstituteName(sub.n),
-      classRoomLabel: formatClassLevelLabel(slot.cls),
-      subjectName: getSubjectNameFromCourse(
-        slot.code,
-        teacher?.pdfGroup || teacher?.g,
-        teacher?.id
-      ),
-      shortDate,
-      note: rowNote,
-    };
-  });
+  return classes
+    .filter((slot) => {
+      const val = teacher
+        ? getSlotAssignment(assignments, teacher.id, slot.p)
+        : assignments[slot.p];
+      return val !== "skip";
+    })
+    .map((slot) => {
+      const val = teacher
+        ? getSlotAssignment(assignments, teacher.id, slot.p)
+        : assignments[slot.p];
+      const sub = resolveSubstitute(val, studentTeacherName);
+      return {
+        p: slot.p + 1,
+        tm: slot.tm,
+        code: slot.code,
+        cls: slot.cls,
+        room: slot.room,
+        n: sub.n,
+        g: sub.g,
+        slotKey: teacher ? `${teacher.id}_${slot.p}` : String(slot.p),
+        absentTeacherId: teacher?.id,
+        absentTeacherName: teacher?.n,
+        subName: formatCleanSubstituteName(sub.n),
+        classRoomLabel: formatClassLevelLabel(slot.cls),
+        subjectName: getSubjectNameFromCourse(
+          slot.code,
+          teacher?.pdfGroup || teacher?.g,
+          teacher?.id
+        ),
+        shortDate,
+        note: rowNote,
+      };
+    });
 }
 
 /**
  * สร้างข้อมูลแถวรวมในตารางเดียวกันสำหรับครูที่ลา 1 หรือหลายท่านในวันเดียวกัน
  * รองรับการกำหนดเหตุผลการลา (หมายเหตุ) แยกตามครูแต่ละท่านได้อย่างอิสระ
+ * และตัดคาบที่ระบุเป็น "skip" (ครูสอนเอง / ลาครึ่งวัน) ออกจากใบสอนแทนอัตโนมัติ
  */
 export function buildCombinedDocumentRows(
   teacherIds: (string | number)[],
@@ -1691,38 +1720,43 @@ export function buildCombinedDocumentRows(
 ): SubstituteRow[] {
   const combinedSlots = getCombinedTeacherClasses(teacherIds, dateStr, includeSupervision);
   const shortDate = formatShortThaiDate(dateStr);
-  return combinedSlots.map((slot) => {
-    const val = getSlotAssignment(assignments, slot.absentTeacherId, slot.p);
-    const sub = resolveSubstitute(val, studentTeacherName);
-    const absentT = getTeacherById(slot.absentTeacherId);
-    const specialty = absentT?.pdfGroup || slot.absentTeacherGroup;
-    const rowNote = resolveTeacherReason(
-      slot.absentTeacherId,
-      defaultReason,
-      teacherReasons
-    );
-    return {
-      p: slot.p + 1,
-      tm: slot.tm,
-      code: slot.code,
-      cls: slot.cls,
-      room: slot.room,
-      n: sub.n,
-      g: sub.g,
-      slotKey: slot.slotKey,
-      absentTeacherId: slot.absentTeacherId,
-      absentTeacherName: slot.absentTeacherName,
-      subName: formatCleanSubstituteName(sub.n),
-      classRoomLabel: formatClassLevelLabel(slot.cls),
-      subjectName: getSubjectNameFromCourse(
-        slot.code,
-        specialty,
-        slot.absentTeacherId
-      ),
-      shortDate,
-      note: rowNote,
-    };
-  });
+  return combinedSlots
+    .filter((slot) => {
+      const val = getSlotAssignment(assignments, slot.absentTeacherId, slot.p);
+      return val !== "skip";
+    })
+    .map((slot) => {
+      const val = getSlotAssignment(assignments, slot.absentTeacherId, slot.p);
+      const sub = resolveSubstitute(val, studentTeacherName);
+      const absentT = getTeacherById(slot.absentTeacherId);
+      const specialty = absentT?.pdfGroup || slot.absentTeacherGroup;
+      const rowNote = resolveTeacherReason(
+        slot.absentTeacherId,
+        defaultReason,
+        teacherReasons
+      );
+      return {
+        p: slot.p + 1,
+        tm: slot.tm,
+        code: slot.code,
+        cls: slot.cls,
+        room: slot.room,
+        n: sub.n,
+        g: sub.g,
+        slotKey: slot.slotKey,
+        absentTeacherId: slot.absentTeacherId,
+        absentTeacherName: slot.absentTeacherName,
+        subName: formatCleanSubstituteName(sub.n),
+        classRoomLabel: formatClassLevelLabel(slot.cls),
+        subjectName: getSubjectNameFromCourse(
+          slot.code,
+          specialty,
+          slot.absentTeacherId
+        ),
+        shortDate,
+        note: rowNote,
+      };
+    });
 }
 
 /**
@@ -2837,6 +2871,9 @@ export function computeSubstituteStatistics(
       if (hasCompositeKeys && !key.includes("_")) {
         return; // ข้ามคีย์ซ้ำเมื่อมีคีย์แบบ `${teacherId}_${periodIdx}`
       }
+      if (assignVal === "skip") {
+        return; // คาบที่ครูสอนเอง (ไม่ได้ลาในคาบนี้) ไม่นับเป็นคาบลาและไม่นับเป็นคาบสอนแทน
+      }
       if (key.includes("_")) {
         const aid = Number(key.split("_")[0]);
         if (aid && byTeacherId[aid]) {
@@ -2870,6 +2907,370 @@ export function computeSubstituteStatistics(
     byTeacherId,
     sortedList,
     totalSubstitutedPeriods,
+  };
+}
+
+/**
+ * คำนวณจำนวนคาบสอนแทนสะสมของครูแต่ละท่านจากประวัติที่บันทึกไว้
+ * โดยไม่นับใบสอนแทนของวันที่กำลังเปิดแก้ไขอยู่ (excludeDateStr) เพื่อไม่ให้นับซ้ำกับหน้าจอปัจจุบัน
+ */
+export function computeCumulativeSubCountsExcludingDate(
+  records: SubstituteRecordLike[],
+  excludeDateStr?: string
+): Record<number, number> {
+  const filtered = excludeDateStr
+    ? records.filter((r) => r.selectedDate !== excludeDateStr)
+    : records;
+  const { byTeacherId } = computeSubstituteStatistics(filtered);
+  const counts: Record<number, number> = {};
+  Object.values(byTeacherId).forEach((st) => {
+    if (st.substitutedPeriods > 0) {
+      counts[st.teacherId] = st.substitutedPeriods;
+    }
+  });
+  return counts;
+}
+
+export type LeavePeriodMode = "full" | "morning" | "afternoon";
+
+/**
+ * ปรับคาบที่ต้องจัดสอนแทนตามช่วงเวลาการลา:
+ * - "full": ลาเต็มวัน (จัดสอนแทนทุกคาบที่มีเรียน)
+ * - "morning": ลาครึ่งเช้า คาบ 1-4 (คาบ 5-7 ตั้งเป็น "skip" ครูสอนเอง)
+ * - "afternoon": ลาครึ่งบ่าย คาบ 5-7 (คาบ 1-4 ตั้งเป็น "skip" ครูสอนเอง)
+ * รองรับการระบุเฉพาะครูบางท่าน (targetTeacherId) หรือครูที่ลาทุกคนในใบเดียวกัน
+ */
+export function applyPartialDayLeaveFilter(
+  teacherIds: (string | number)[],
+  dateStr: string,
+  currentAssignments: Record<string | number, string>,
+  mode: LeavePeriodMode,
+  targetTeacherId?: number | string,
+  includeSupervision = false
+): Record<string, string> {
+  const combinedSlots = getCombinedTeacherClasses(teacherIds, dateStr, includeSupervision);
+  const modified: Record<string, string> = {};
+  const targetNumId =
+    targetTeacherId !== undefined && targetTeacherId !== null && String(targetTeacherId) !== ""
+      ? Number(targetTeacherId)
+      : undefined;
+
+  combinedSlots.forEach((slot) => {
+    const existing = getSlotAssignment(currentAssignments, slot.absentTeacherId, slot.p);
+    if (targetNumId !== undefined && slot.absentTeacherId !== targetNumId) {
+      if (existing) modified[slot.slotKey] = existing;
+      return;
+    }
+
+    const shouldSkip =
+      mode === "morning"
+        ? slot.p >= 4
+        : mode === "afternoon"
+        ? slot.p <= 3
+        : false;
+
+    if (shouldSkip) {
+      modified[slot.slotKey] = "skip";
+    } else if (existing && existing !== "skip") {
+      modified[slot.slotKey] = existing;
+    }
+  });
+
+  return reconcileCombinedSubstitutes(teacherIds, dateStr, modified, includeSupervision);
+}
+
+/**
+ * ตรวจสอบสถานะช่วงเวลาการลาปัจจุบันของครู (เต็มวัน / ครึ่งเช้า / ครึ่งบ่าย / กำหนดรายคาบ)
+ */
+export function detectLeavePeriodMode(
+  teacherIds: (string | number)[],
+  dateStr: string,
+  assignments: Record<string | number, string>,
+  targetTeacherId?: number | string,
+  includeSupervision = false
+): LeavePeriodMode | "custom" {
+  const combinedSlots = getCombinedTeacherClasses(teacherIds, dateStr, includeSupervision);
+  const targetNumId =
+    targetTeacherId !== undefined && targetTeacherId !== null && String(targetTeacherId) !== ""
+      ? Number(targetTeacherId)
+      : undefined;
+
+  const relevantSlots =
+    targetNumId !== undefined
+      ? combinedSlots.filter((s) => s.absentTeacherId === targetNumId)
+      : combinedSlots;
+
+  if (relevantSlots.length === 0) return "full";
+
+  const skippedCount = relevantSlots.filter(
+    (s) => getSlotAssignment(assignments, s.absentTeacherId, s.p) === "skip"
+  ).length;
+  if (skippedCount === 0) return "full";
+
+  const hasMorning = relevantSlots.some((s) => s.p <= 3);
+  const hasAfternoon = relevantSlots.some((s) => s.p >= 4);
+
+  const isMorningLeaveExact =
+    hasAfternoon &&
+    relevantSlots.every((s) => {
+      const isSkipped = getSlotAssignment(assignments, s.absentTeacherId, s.p) === "skip";
+      return s.p <= 3 ? !isSkipped : isSkipped;
+    });
+  if (isMorningLeaveExact) return "morning";
+
+  const isAfternoonLeaveExact =
+    hasMorning &&
+    relevantSlots.every((s) => {
+      const isSkipped = getSlotAssignment(assignments, s.absentTeacherId, s.p) === "skip";
+      return s.p >= 4 ? !isSkipped : isSkipped;
+    });
+  if (isAfternoonLeaveExact) return "afternoon";
+
+  return "custom";
+}
+
+export interface DoubleBookingConflict {
+  periodIndex: number; // 0-based (0..6)
+  periodNumber: number; // 1-based (1..7)
+  substituteTeacherId: number;
+  substituteTeacherName: string;
+  slots: CombinedClassSlot[];
+}
+
+/**
+ * ตรวจสอบว่ามีการเลือกครูผู้สอนแทนคนเดียวกันซ้ำในคาบเรียนเดียวกันหรือไม่ (เมื่อมีครูลาหลายท่าน)
+ */
+export function findDoubleBookedSubstitutes(
+  slots: CombinedClassSlot[],
+  assignments: Record<string | number, string>
+): DoubleBookingConflict[] {
+  const byPeriodAndSub = new Map<string, CombinedClassSlot[]>();
+
+  slots.forEach((slot) => {
+    const val = getSlotAssignment(assignments, slot.absentTeacherId, slot.p);
+    if (!val || val === "skip" || !val.startsWith("t")) return;
+    const subId = Number(val.slice(1));
+    if (!subId) return;
+    const key = `${slot.p}_${subId}`;
+    const list = byPeriodAndSub.get(key) || [];
+    list.push(slot);
+    byPeriodAndSub.set(key, list);
+  });
+
+  const conflicts: DoubleBookingConflict[] = [];
+  byPeriodAndSub.forEach((conflictSlots, key) => {
+    if (conflictSlots.length <= 1) return;
+    const [pStr, subIdStr] = key.split("_");
+    const periodIndex = Number(pStr);
+    const substituteTeacherId = Number(subIdStr);
+    const subTeacher = getTeacherById(substituteTeacherId);
+    conflicts.push({
+      periodIndex,
+      periodNumber: periodIndex + 1,
+      substituteTeacherId,
+      substituteTeacherName: subTeacher?.n || `รหัส ${substituteTeacherId}`,
+      slots: conflictSlots,
+    });
+  });
+
+  return conflicts.sort((a, b) => a.periodIndex - b.periodIndex);
+}
+
+export interface ScheduleCellValidationIssue {
+  dayIndex: number;
+  dayName: string;
+  periodIndex: number;
+  periodNumber: number;
+  rawValue: string;
+  message: string;
+  suggestedValue?: string;
+}
+
+/**
+ * ปรับรูปแบบข้อความในช่องตารางสอน 1 ช่องให้ถูกต้องตามมาตรฐาน (ถ้าสามารถแก้ไขอัตโนมัติได้)
+ * เช่น:
+ * - "ว211021/1" -> "ว21102 1/1" (ลืมเว้นวรรคระหว่างรหัสวิชากับชั้นเรียน)
+ * - "ท31102 ม.4/1@138" -> "ท31102 4/1@138" (ตัดคำว่า ม. ออกให้ตรงรูปแบบมาตรฐาน)
+ * - "ค22102  2/1 @ 112" -> "ค22102 2/1@112" (จัดช่องว่างรอบ @ ให้สะอาด)
+ */
+export function autoFixScheduleCellFormat(rawCell: string): string {
+  const trimmed = String(rawCell || "").replace(/[|,]/g, " ").trim();
+  if (!trimmed || trimmed === "*" || trimmed.startsWith("#")) {
+    return trimmed;
+  }
+
+  // จัดการช่องว่างรอบ @ เช่น "ว21102 1/1 @ 121" -> "ว21102 1/1@121"
+  const normalizedAt = trimmed.replace(/\s*@\s*/g, "@").replace(/\s+/g, " ");
+  const [courseAndClass, roomPart] = normalizedAt.split("@");
+  const roomSuffix = roomPart ? `@${roomPart.trim()}` : "";
+
+  // กรณีพิมพ์รหัสวิชาติดกับชั้นเรียน หรือมีคำว่า ม. นำหน้าชั้นเรียน เช่น "ว211021/1", "ว21102ม.1/1", "ว21102 ม.1/1", "ค32202-พต5/1"
+  const attachedMatch = courseAndClass
+    .trim()
+    .match(/^([ก-ฮA-Za-z]{1,4}\d{4,5}(?:-[ก-ฮA-Za-z0-9]+)?)\s*(?:ม\.?)?\s*([1-6]\/[1-9]\d*)$/);
+  if (attachedMatch) {
+    return `${attachedMatch[1]} ${attachedMatch[2]}${roomSuffix}`;
+  }
+
+  // กรณี "เลือกเสรี ม.1/1" หรือ "เลือกเสรี1/1"
+  const freeElectiveMatch = courseAndClass
+    .trim()
+    .match(/^(เลือกเสรี)\s*(?:ม\.?)?\s*([1-6]\/[1-9]\d*)$/);
+  if (freeElectiveMatch) {
+    return `${freeElectiveMatch[1]} ${freeElectiveMatch[2]}${roomSuffix}`;
+  }
+
+  return `${courseAndClass.trim()}${roomSuffix}`;
+}
+
+/**
+ * ตรวจสอบความถูกต้องของข้อความในตารางสอน 5 วัน x 7 คาบ เพื่อป้องกันการพิมพ์ผิดรูปแบบ
+ */
+export function validateTeacherScheduleGrid(
+  grid: string[][]
+): ScheduleCellValidationIssue[] {
+  const issues: ScheduleCellValidationIssue[] = [];
+
+  for (let d = 0; d < Math.min(5, grid.length); d++) {
+    const row = grid[d] || [];
+    for (let p = 0; p < Math.min(7, row.length); p++) {
+      const raw = String(row[p] || "").trim();
+      if (!raw || raw === "*" || raw.startsWith("#")) continue;
+
+      const autoFixed = autoFixScheduleCellFormat(raw);
+      if (autoFixed !== raw) {
+        issues.push({
+          dayIndex: d,
+          dayName: DAYS[d] || `วันที่ ${d + 1}`,
+          periodIndex: p,
+          periodNumber: p + 1,
+          rawValue: raw,
+          message: `ควรเว้นวรรครหัสวิชากับชั้นเรียนให้ถูกต้องเป็น "${autoFixed}"`,
+          suggestedValue: autoFixed,
+        });
+        continue;
+      }
+
+      const [coursePart] = raw.split("@");
+      const tokens = coursePart.trim().split(/\s+/);
+      const code = tokens[0] || "";
+      const cls = tokens.slice(1).join(" ").trim();
+
+      if (code === "เลือกเสรี") continue;
+
+      if (!cls) {
+        issues.push({
+          dayIndex: d,
+          dayName: DAYS[d] || `วันที่ ${d + 1}`,
+          periodIndex: p,
+          periodNumber: p + 1,
+          rawValue: raw,
+          message: `ระบุเฉพาะรหัสวิชา "${code}" แต่ยังไม่ได้ระบุชั้นเรียน (เช่น "${code} 1/1")`,
+        });
+        continue;
+      }
+
+      if (/^\d{3}$/.test(cls)) {
+        issues.push({
+          dayIndex: d,
+          dayName: DAYS[d] || `วันที่ ${d + 1}`,
+          periodIndex: p,
+          periodNumber: p + 1,
+          rawValue: raw,
+          message: `"${cls}" ดูเหมือนเลขห้องเรียน 3 หลัก ควรระบุชั้นเรียนด้วย เช่น "${code} 1/1@${cls}"`,
+        });
+        continue;
+      }
+
+      if (!/^[1-6](\/[1-9]\d*)?$/.test(cls)) {
+        issues.push({
+          dayIndex: d,
+          dayName: DAYS[d] || `วันที่ ${d + 1}`,
+          periodIndex: p,
+          periodNumber: p + 1,
+          rawValue: raw,
+          message: `ชั้นเรียน "${cls}" ไม่ตรงรูปแบบมาตรฐาน (ควรเป็น 1/1 ถึง 6/2 เช่น "${code} 1/1")`,
+        });
+      }
+    }
+  }
+
+  return issues;
+}
+
+/**
+ * จัดรูปแบบช่องตารางสอน 5x7 ที่สามารถแก้ไขอัตโนมัติได้ทั้งหมดในคลิกเดียว
+ */
+export function autoFixScheduleGridFormat(grid: string[][]): {
+  grid: string[][];
+  fixedCount: number;
+} {
+  let fixedCount = 0;
+  const nextGrid = grid.map((row) =>
+    row.map((cell) => {
+      const raw = String(cell || "").trim();
+      const fixed = autoFixScheduleCellFormat(raw);
+      if (fixed !== raw) {
+        fixedCount++;
+      }
+      return fixed;
+    })
+  );
+  return { grid: nextGrid, fixedCount };
+}
+
+/**
+ * รวมข้อมูลใบสอนแทนที่เคยบันทึกไว้ในวันเดียวกันเข้ากับรายการครูที่กำลังเลือกอยู่บนหน้าจอ
+ * โดยรักษาเหตุผลการลารายบุคคลและผู้สอนแทนเดิมของทั้งสองฝั่ง พร้อมป้องกันครูสอนแทนชนกันอัตโนมัติ
+ */
+export function mergeSubstituteWorkspaceWithRecord(
+  currentAbsentIds: string[],
+  currentReasons: Record<string, string>,
+  currentAssignments: Record<string, string>,
+  savedRecord: SubstituteRecordLike & { teacherReasons?: Record<string, string> },
+  dateStr: string,
+  includeSupervision = false
+): {
+  absentTeacherIds: string[];
+  teacherReasons: Record<string, string>;
+  assignments: Record<string, string>;
+} {
+  const savedIds =
+    Array.isArray(savedRecord.absentTeacherIds) && savedRecord.absentTeacherIds.length > 0
+      ? savedRecord.absentTeacherIds.map(String)
+      : [String(savedRecord.absentTeacherId)];
+
+  const mergedIds = Array.from(
+    new Set([...savedIds, ...currentAbsentIds].map((id) => String(id).trim()).filter(Boolean))
+  );
+
+  const mergedReasons: Record<string, string> = {};
+  savedIds.forEach((id) => {
+    mergedReasons[id] =
+      savedRecord.teacherReasons?.[id] || savedRecord.reason || "ไปราชการ";
+  });
+  Object.entries(currentReasons).forEach(([id, r]) => {
+    if (r && r.trim()) {
+      mergedReasons[id] = r.trim();
+    }
+  });
+
+  const combinedRawAssignments: Record<string, string> = {
+    ...(savedRecord.assignments || {}),
+    ...currentAssignments,
+  };
+
+  const reconciled = reconcileCombinedSubstitutes(
+    mergedIds,
+    dateStr,
+    combinedRawAssignments,
+    includeSupervision
+  );
+
+  return {
+    absentTeacherIds: mergedIds,
+    teacherReasons: mergedReasons,
+    assignments: reconciled,
   };
 }
 
