@@ -100,6 +100,7 @@ async function triggerBrowserDownload(
 }
 
 const cachedImagesMap = new Map<string, Promise<HTMLImageElement>>();
+const cachedSharpenedLogoMap = new Map<string, Promise<HTMLCanvasElement>>();
 const cachedPngBase64Map = new Map<string, Promise<string>>();
 
 function loadImage(src: string): Promise<HTMLImageElement> {
@@ -125,10 +126,127 @@ function loadImage(src: string): Promise<HTMLImageElement> {
   return promise;
 }
 
+/**
+ * อัปสเกลและปรับความคมชัดของโลโก้โรงเรียน/สพฐ. ด้วย Unsharp Mask + ลบจุดรบกวนพื้นหลัง JPEG (Mosquito Noise)
+ * เพื่อให้เวลาวาดลงบน Canvas ความละเอียดสูง (Ultra HD / 4K) หรือส่งออกเป็น PNG / PDF / Word โลโก้จะคมกริบและพื้นหลังขาวสะอาด
+ */
+async function loadSharpenedLogoCanvas(
+  src: string,
+  fallbackDataUrl?: string,
+  targetHeight = 420
+): Promise<HTMLCanvasElement> {
+  const cacheKey = `${src}::${targetHeight}`;
+  const existing = cachedSharpenedLogoMap.get(cacheKey);
+  if (existing) return existing;
+
+  const promise = (async () => {
+    const img = await loadImage(src).catch(() => {
+      if (fallbackDataUrl) return loadImage(fallbackDataUrl);
+      throw new Error("Failed to load logo image");
+    });
+
+    const natW = img.naturalWidth || 200;
+    const natH = img.naturalHeight || 200;
+    const h = Math.max(targetHeight, natH);
+    const w = Math.max(1, Math.round((natW / natH) * h));
+
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return canvas;
+
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(img, 0, 0, w, h);
+
+    try {
+      const imgData = ctx.getImageData(0, 0, w, h);
+      const srcPx = imgData.data;
+      const outData = ctx.createImageData(w, h);
+      const dstPx = outData.data;
+
+      // 1. ลบคราบพื้นหลังสีเทาอ่อน/จุดรบกวนจากการบีบอัด JPEG รอบๆ ตราสัญลักษณ์ให้เป็นสีขาวบริสุทธิ์
+      const cleaned = new Uint8ClampedArray(srcPx.length);
+      for (let i = 0; i < srcPx.length; i += 4) {
+        const r = srcPx[i];
+        const g = srcPx[i + 1];
+        const b = srcPx[i + 2];
+        const a = srcPx[i + 3];
+        if (a < 18) {
+          cleaned[i] = 255;
+          cleaned[i + 1] = 255;
+          cleaned[i + 2] = 255;
+          cleaned[i + 3] = 0;
+          continue;
+        }
+        const maxC = Math.max(r, g, b);
+        const minC = Math.min(r, g, b);
+        const spread = maxC - minC;
+        if (r >= 240 && g >= 240 && b >= 240 && spread <= 16) {
+          cleaned[i] = 255;
+          cleaned[i + 1] = 255;
+          cleaned[i + 2] = 255;
+          cleaned[i + 3] = 255;
+        } else {
+          cleaned[i] = r;
+          cleaned[i + 1] = g;
+          cleaned[i + 2] = b;
+          cleaned[i + 3] = a;
+        }
+      }
+
+      // 2. Unsharp Mask (3x3 Laplacian Sharpening) เพื่อเร่งความคมของเส้นโลโก้และตัวอักษรในตรา
+      const amount = 0.55;
+      for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+          const idx = (y * w + x) * 4;
+          if (y === 0 || y === h - 1 || x === 0 || x === w - 1) {
+            dstPx[idx] = cleaned[idx];
+            dstPx[idx + 1] = cleaned[idx + 1];
+            dstPx[idx + 2] = cleaned[idx + 2];
+            dstPx[idx + 3] = cleaned[idx + 3];
+            continue;
+          }
+          const top = ((y - 1) * w + x) * 4;
+          const bottom = ((y + 1) * w + x) * 4;
+          const left = (y * w + (x - 1)) * 4;
+          const right = (y * w + (x + 1)) * 4;
+
+          for (let c = 0; c < 3; c++) {
+            const center = cleaned[idx + c];
+            const neighbors =
+              (cleaned[top + c] +
+                cleaned[bottom + c] +
+                cleaned[left + c] +
+                cleaned[right + c]) *
+              0.25;
+            const sharpened = center + (center - neighbors) * amount;
+            dstPx[idx + c] = Math.max(0, Math.min(255, Math.round(sharpened)));
+          }
+          dstPx[idx + 3] = cleaned[idx + 3];
+        }
+      }
+
+      ctx.putImageData(outData, 0, 0);
+    } catch {
+      // Fallback to high-smoothing image if pixel manipulation is restricted
+    }
+
+    return canvas;
+  })();
+
+  promise.catch(() => {
+    cachedSharpenedLogoMap.delete(cacheKey);
+  });
+  cachedSharpenedLogoMap.set(cacheKey, promise);
+  return promise;
+}
+
 async function loadImageToPngBase64(
   src: string,
   fallbackDataUrl?: string,
-  maxDimension = 200
+  maxDimension = 600
 ): Promise<string> {
   const cacheKey = `${src}::${maxDimension}`;
   const cached = cachedPngBase64Map.get(cacheKey);
@@ -137,27 +255,13 @@ async function loadImageToPngBase64(
   const promise = (async () => {
     if (typeof document !== "undefined") {
       try {
-        const img = await loadImage(src).catch(() => {
-          if (fallbackDataUrl) return loadImage(fallbackDataUrl);
-          throw new Error("Failed to load image");
-        });
-        const natW = img.naturalWidth || 200;
-        const natH = img.naturalHeight || 200;
-        const ratio = Math.min(1, maxDimension / Math.max(natW, natH));
-        const targetW = Math.max(1, Math.round(natW * ratio));
-        const targetH = Math.max(1, Math.round(natH * ratio));
-
-        const c = document.createElement("canvas");
-        c.width = targetW;
-        c.height = targetH;
-        const ctx = c.getContext("2d");
-        if (ctx) {
-          ctx.imageSmoothingEnabled = true;
-          ctx.imageSmoothingQuality = "high";
-          ctx.drawImage(img, 0, 0, targetW, targetH);
-          const dataUrl = c.toDataURL("image/png");
-          return dataUrl.split(",")[1] || "";
-        }
+        const sharpenedCanvas = await loadSharpenedLogoCanvas(
+          src,
+          fallbackDataUrl,
+          maxDimension
+        );
+        const dataUrl = sharpenedCanvas.toDataURL("image/png");
+        return dataUrl.split(",")[1] || "";
       } catch {
         // Fallback below
       }
@@ -471,7 +575,7 @@ export async function renderPaperPageCanvas(
   pageIndex: number,
   totalPages: number,
   isLastPage: boolean,
-  scale = 2
+  scale = 3.5
 ): Promise<HTMLCanvasElement> {
   await ensureSarabunFontLoaded();
 
@@ -506,8 +610,8 @@ export async function renderPaperPageCanvas(
   const dataRowHeight = pageRows.length > 10 ? 35 : pageRows.length > 6 ? 38 : 42;
 
   const canvas = document.createElement("canvas");
-  canvas.width = pageWidth * scale;
-  canvas.height = pageHeight * scale;
+  canvas.width = Math.round(pageWidth * scale);
+  canvas.height = Math.round(pageHeight * scale);
 
   const ctx = canvas.getContext("2d");
   if (!ctx) {
@@ -515,23 +619,27 @@ export async function renderPaperPageCanvas(
   }
 
   ctx.scale(scale, scale);
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
 
-  // พื้นหลังกระดาษขาว
+  // พื้นหลังกระดาษขาวบริสุทธิ์
   ctx.fillStyle = "#ffffff";
   ctx.fillRect(0, 0, pageWidth, pageHeight);
   ctx.textBaseline = "alphabetic";
 
-  // 1. วาดโลโก้ซ้าย (ตราโรงเรียนวรคุณอุปถัมภ์) และโลโก้ขวา (ตราหมายเลข 1)
+  // 1. วาดโลโก้ซ้าย (ตราโรงเรียนวรคุณอุปถัมภ์) และโลโก้ขวา (ตราหมายเลข 1) ด้วยระบบปรับความคมชัดสูง (Unsharp Mask + ลบคราบ JPEG)
   // จัดระยะห่างขนาบหัวกระดาษให้สมดุลพองาม (โลโก้ซ้าย -195px และโลโก้ขวา +204px จากกึ่งกลางหน้ากระดาษ ช่องไฟขนาบตัวหนังสือสมมาตรซ้าย-ขวา)
   try {
-    const leftLogoImg = await loadImage(LEFT_SCHOOL_LOGO_URL).catch(() =>
-      loadImage(SCHOOL_LOGO)
+    const leftLogoCanvas = await loadSharpenedLogoCanvas(
+      LEFT_SCHOOL_LOGO_URL,
+      SCHOOL_LOGO,
+      460
     );
     const leftLogoH = 92;
-    const leftLogoW = (leftLogoImg.naturalWidth / leftLogoImg.naturalHeight) * leftLogoH;
+    const leftLogoW = (leftLogoCanvas.width / leftLogoCanvas.height) * leftLogoH;
     const leftCenterX = pageWidth / 2 - 195;
     ctx.drawImage(
-      leftLogoImg,
+      leftLogoCanvas,
       leftCenterX - leftLogoW / 2,
       headerTopY - 2,
       leftLogoW,
@@ -542,12 +650,16 @@ export async function renderPaperPageCanvas(
   }
 
   try {
-    const rightLogoImg = await loadImage(RIGHT_OBEC_LOGO_URL);
+    const rightLogoCanvas = await loadSharpenedLogoCanvas(
+      RIGHT_OBEC_LOGO_URL,
+      undefined,
+      420
+    );
     const rightLogoH = 84;
-    const rightLogoW = (rightLogoImg.naturalWidth / rightLogoImg.naturalHeight) * rightLogoH;
+    const rightLogoW = (rightLogoCanvas.width / rightLogoCanvas.height) * rightLogoH;
     const rightCenterX = pageWidth / 2 + 204;
     ctx.drawImage(
-      rightLogoImg,
+      rightLogoCanvas,
       rightCenterX - rightLogoW / 2,
       headerTopY + 2,
       rightLogoW,
@@ -792,7 +904,7 @@ export async function renderPaperPagesToCanvases(
   dateStr: string,
   reason: string,
   rows: SubstituteRow[],
-  scale = 2
+  scale = 3.5
 ): Promise<HTMLCanvasElement[]> {
   const chunks = chunkSubstituteRows(rows);
   const canvases: HTMLCanvasElement[] = [];
@@ -820,16 +932,36 @@ export async function renderPaperPagesToCanvases(
 }
 
 /**
- * วาดหน้าแรกของแบบบันทึกการจัดสอนแทน (สำหรับการแสดงผลพรีวิวทั่วไป)
+ * วาดหน้าแรกของแบบบันทึกการจัดสอนแทน (สำหรับการแสดงผลพรีวิวหรือการส่งออกความละเอียดสูง)
  */
 export async function renderPaperToCanvas(
   absentTeacher: TeacherRecord,
   dateStr: string,
   reason: string,
-  rows: SubstituteRow[]
+  rows: SubstituteRow[],
+  scale = 3.5
 ): Promise<HTMLCanvasElement> {
-  const canvases = await renderPaperPagesToCanvases(absentTeacher, dateStr, reason, rows);
-  return canvases[0] || (await renderPaperPageCanvas(absentTeacher, dateStr, reason, rows, 0, 0, 1, true));
+  const canvases = await renderPaperPagesToCanvases(
+    absentTeacher,
+    dateStr,
+    reason,
+    rows,
+    scale
+  );
+  return (
+    canvases[0] ||
+    (await renderPaperPageCanvas(
+      absentTeacher,
+      dateStr,
+      reason,
+      rows,
+      0,
+      0,
+      1,
+      true,
+      scale
+    ))
+  );
 }
 
 export interface SubstituteSheetData {
@@ -1107,8 +1239,8 @@ async function generateMultiDocxBlob(sheets: SubstituteSheetData[]): Promise<Blo
   await ensureSarabunFontLoaded();
 
   const [leftLogoBase64, rightLogoBase64] = await Promise.all([
-    loadImageToPngBase64(LEFT_SCHOOL_LOGO_URL, SCHOOL_LOGO, 200),
-    loadImageToPngBase64(RIGHT_OBEC_LOGO_URL, undefined, 200),
+    loadImageToPngBase64(LEFT_SCHOOL_LOGO_URL, SCHOOL_LOGO, 600),
+    loadImageToPngBase64(RIGHT_OBEC_LOGO_URL, undefined, 600),
   ]);
   const hasRightLogo = Boolean(rightLogoBase64);
 
@@ -1230,10 +1362,19 @@ export async function exportSubstituteDocument(
     return;
   }
 
-  const canvases = await renderPaperPagesToCanvases(absentTeacher, dateStr, reason, rows);
+  // สำหรับรูปภาพ PNG ใช้ความละเอียด Ultra HD 4K (scale = 3.5 -> 3931 x 2779 px, ~336 DPI)
+  // สำหรับ PDF ใช้ความละเอียดสูง 2.8x (3144 x 2223 px) + JPEG 0.95 เพื่อให้คมชัดแต่ขนาดไฟล์เล็กกะทัดรัด (~250-350 KB)
+  const targetScale = format === "image" ? 3.5 : 2.8;
+  const canvases = await renderPaperPagesToCanvases(
+    absentTeacher,
+    dateStr,
+    reason,
+    rows,
+    targetScale
+  );
 
   if (format === "image") {
-    // ถ้ามีหน้าเดียว ให้ดาวน์โหลดรูปภาพไฟล์เดียวปกติ
+    // ถ้ามีหน้าเดียว ให้ดาวน์โหลดรูปภาพไฟล์เดียวปกติ (PNG ความละเอียดสูง Ultra HD 4K)
     if (canvases.length <= 1) {
       const primaryCanvas = canvases[0];
       const blob = await new Promise<Blob | null>((resolve) =>
@@ -1265,8 +1406,8 @@ export async function exportSubstituteDocument(
     return;
   }
 
-  // ส่งออก PDF ขนาด A4 แนวนอน (297 x 210 mm) โดยบีบอัดด้วย JPEG คุณภาพสูง (0.92) + PDF stream compression
-  // ช่วยลดขนาดไฟล์จาก ~10.7 MB เหลือเพียง ~150-250 KB ต่อหน้า โดยยังคมชัดระดับพิมพ์ใช้งานจริงและสร้างไฟล์เสร็จทันที
+  // ส่งออก PDF ขนาด A4 แนวนอน (297 x 210 mm) โดยบีบอัดด้วย JPEG คุณภาพสูง (0.95) + PDF stream compression
+  // ช่วยลดขนาดไฟล์จาก ~10.7 MB เหลือเพียง ~250-350 KB ต่อหน้า โดยยังคมชัดระดับพิมพ์ใช้งานจริงและสร้างไฟล์เสร็จทันที
   const pdf = new jsPDF({
     orientation: "landscape",
     unit: "mm",
@@ -1277,7 +1418,7 @@ export async function exportSubstituteDocument(
     if (idx > 0) {
       pdf.addPage("a4", "l");
     }
-    const imgData = canvas.toDataURL("image/jpeg", 0.92);
+    const imgData = canvas.toDataURL("image/jpeg", 0.95);
     pdf.addImage(imgData, "JPEG", 0, 0, 297, 210, undefined, "FAST");
   });
   const pdfBlob = pdf.output("blob");
@@ -1285,7 +1426,7 @@ export async function exportSubstituteDocument(
 }
 
 /**
- * ดาวน์โหลดรูปภาพเฉพาะหน้าที่เลือก (หน้า 1 หรือ หน้า 2)
+ * ดาวน์โหลดรูปภาพเฉพาะหน้าที่เลือก (หน้า 1 หรือ หน้า 2) ความละเอียด Ultra HD 4K (scale = 3.5)
  */
 export async function exportSingleSubstitutePageImage(
   absentTeacher: TeacherRecord,
@@ -1294,7 +1435,13 @@ export async function exportSingleSubstitutePageImage(
   rows: SubstituteRow[],
   pageIndex: number
 ): Promise<void> {
-  const canvases = await renderPaperPagesToCanvases(absentTeacher, dateStr, reason, rows);
+  const canvases = await renderPaperPagesToCanvases(
+    absentTeacher,
+    dateStr,
+    reason,
+    rows,
+    3.5
+  );
   const target = canvases[pageIndex] || canvases[0];
   if (!target) return;
   const rawIdStr = absentTeacher.pdfGroup ? absentTeacher.pdfGroup.replace(/\s+/g, "") : "";
@@ -1343,9 +1490,16 @@ export async function exportMultipleSubstituteDocuments(
     return;
   }
 
+  const targetScale = format === "image" ? 3.5 : 2.8;
   const canvases: HTMLCanvasElement[] = [];
   for (const s of sheets) {
-    const c = await renderPaperToCanvas(s.absentTeacher, s.dateStr, s.reason, s.rows);
+    const c = await renderPaperToCanvas(
+      s.absentTeacher,
+      s.dateStr,
+      s.reason,
+      s.rows,
+      targetScale
+    );
     canvases.push(c);
   }
 
@@ -1358,7 +1512,7 @@ export async function exportMultipleSubstituteDocuments(
     });
     canvases.forEach((canvas, idx) => {
       if (idx > 0) pdf.addPage("a4", "l");
-      const imgData = canvas.toDataURL("image/jpeg", 0.92);
+      const imgData = canvas.toDataURL("image/jpeg", 0.95);
       const pdfWidth = 297;
       const pdfHeight = (pdfWidth * canvas.height) / canvas.width;
       pdf.addImage(imgData, "JPEG", 0, 0, pdfWidth, pdfHeight, undefined, "FAST");

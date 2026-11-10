@@ -336,11 +336,11 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
 
     let cancelled = false;
     const timer = window.setTimeout(() => {
-      renderPaperPagesToCanvases(combinedHeaderTeacher, selectedDate, reason, docRows, 1.35)
+      renderPaperPagesToCanvases(combinedHeaderTeacher, selectedDate, reason, docRows, 2.5)
         .then((canvases) => {
           if (!cancelled) {
             lastRenderedKeyRef.current = previewRenderKey;
-            setPreviewPages(canvases.map((c) => c.toDataURL("image/jpeg", 0.92)));
+            setPreviewPages(canvases.map((c) => c.toDataURL("image/png")));
           }
         })
         .catch(() => {
@@ -1876,20 +1876,31 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
           aria-modal="true"
           className="fixed inset-0 z-50 bg-black/85 flex flex-col items-center justify-start p-3 sm:p-6 overflow-y-auto"
         >
-          <div className="w-full max-w-[1123px] flex items-center justify-between gap-2 mb-3 text-white sticky top-0 z-10 bg-black/70 backdrop-blur-xs py-2 px-3 rounded-lg">
+          <div className="w-full max-w-[1123px] flex flex-wrap items-center justify-between gap-2 mb-3 text-white sticky top-0 z-10 bg-black/75 backdrop-blur-xs py-2 px-3 rounded-lg">
             <span className="text-xs sm:text-sm font-semibold">
               {previewPages.length > 1
-                ? `แบบบันทึกการจัดสอนแทน (${previewPages.length} หน้า)`
-                : "แบบบันทึกการจัดสอนแทน"}
+                ? `แบบบันทึกการจัดสอนแทน (${previewPages.length} หน้า · ความละเอียดสูง)`
+                : "แบบบันทึกการจัดสอนแทน (ความละเอียดสูง)"}
             </span>
-            <button
-              type="button"
-              onClick={() => setFullscreenImageOpen(false)}
-              className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-white text-xs sm:text-sm font-bold cursor-pointer shrink-0"
-            >
-              <X className="w-4 h-4" />
-              <span>ปิด</span>
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={isExporting}
+                onClick={() => handleExport("image")}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1b4fb8] hover:bg-[#153e91] text-white text-xs sm:text-sm font-bold cursor-pointer shrink-0 shadow-xs"
+              >
+                <ImageIcon className="w-4 h-4" />
+                <span>ดาวน์โหลดรูปชัดพิเศษ (Ultra HD)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setFullscreenImageOpen(false)}
+                className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-white text-xs sm:text-sm font-bold cursor-pointer shrink-0"
+              >
+                <X className="w-4 h-4" />
+                <span>ปิด</span>
+              </button>
+            </div>
           </div>
           <div className="w-full max-w-[1123px] space-y-4">
             {(previewPages.length > 0 ? previewPages : [previewDataUrl]).map((pageUrl, pIdx) => (
