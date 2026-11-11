@@ -400,7 +400,65 @@ export default function App() {
     void saveLiveWorkspaceToCloud(stateWithClient, header);
   };
 
-  // เปลี่ยนครูหลักจาก #ta
+  // บันทึกหรืออัปเดตใบสอนแทนรวมลงฐานข้อมูลประวัติอัตโนมัติ พร้อมยุบรวมใบย่อยของวันเดียวกันที่เป็น subset เข้าเป็นใบเดียว
+  const persistCombinedRecordToDatabase = async (
+    targetAbsentIds: string[],
+    targetDate: string,
+    targetDefaultReason: string,
+    targetTeacherReasons: Record<string, string>,
+    targetStudentName: string,
+    targetIncludeSupervision: boolean,
+    targetAssignments: Record<string, string>,
+    explicitRecordIdToReplace?: string
+  ) => {
+    const cleanIds = targetAbsentIds.filter((id) => !isTeacherExemptFromNeedingSubstitute(id));
+    if (cleanIds.length === 0) return;
+    const combinedHeader = buildCombinedTeacherHeader(cleanIds);
+    if (!combinedHeader) return;
+    const idsPart = cleanIds.join("-");
+    const recordId = `rec_${idsPart}_${targetDate.replace(/[^0-9]/g, "")}`;
+    const selectedTeachersForSummary = cleanIds
+      .map((id) => teachers.find((t) => String(t.id) === String(id)))
+      .filter((t): t is TeacherRecord => Boolean(t));
+    const combinedReasonSummary = formatCombinedReasonsSummary(
+      selectedTeachersForSummary,
+      targetDefaultReason,
+      targetTeacherReasons
+    );
+
+    const obsoleteSameDateRecords = savedRecords.filter((r) => {
+      if (r.recordId === recordId) return false;
+      if (explicitRecordIdToReplace && r.recordId === explicitRecordIdToReplace) return true;
+      if (r.selectedDate !== targetDate) return false;
+      const rIds = extractRecordTeacherIds(r);
+      return rIds.length > 0 && rIds.every((id) => cleanIds.includes(id));
+    });
+
+    let baseRecords = savedRecords;
+    for (const oldRec of obsoleteSameDateRecords) {
+      baseRecords = await removeSubstituteRecordFromDatabase(oldRec.recordId, baseRecords);
+    }
+
+    const updatedRecords = await upsertSubstituteRecordInDatabase(
+      {
+        recordId,
+        absentTeacherId: combinedHeader.id,
+        absentTeacherIds: [...cleanIds],
+        absentTeacherName: combinedHeader.n,
+        absentTeacherGroup: combinedHeader.pdfGroup,
+        selectedDate: targetDate,
+        reason: combinedReasonSummary,
+        teacherReasons: { ...targetTeacherReasons },
+        studentTeacherName: targetStudentName,
+        includeSupervision: targetIncludeSupervision,
+        assignments: targetAssignments,
+      },
+      baseRecords
+    );
+    setSavedRecords(updatedRecords);
+  };
+
+  // เปลี่ยนครูหลักจาก #ta (เมื่อเลือกครูใหม่ ให้ตั้งสถานะเริ่มต้นเป็น "ไปราชการ" เสมอ)
   const handlePrimaryTeacherChange = (newId: string) => {
     if (!newId) {
       setAbsentTeacherIds([]);
@@ -410,9 +468,10 @@ export default function App() {
     if (isTeacherExemptFromNeedingSubstitute(newId)) return;
     const rest = absentTeacherIds.slice(1).filter((id) => id !== newId);
     const nextIds = [newId, ...rest];
+    const nextDefaultReason = nextIds.length === 1 ? "ไปราชการ" : reason || "ไปราชการ";
     const nextReasons: Record<string, string> = {
       ...teacherReasons,
-      [newId]: teacherReasons[newId] || reason || "ไปราชการ",
+      [newId]: "ไปราชการ",
     };
     const nextAssignments = autoAssignCombinedSubstitutes(
       nextIds,
@@ -420,12 +479,15 @@ export default function App() {
       includeSupervision
     );
     setAbsentTeacherIds(nextIds);
+    if (nextIds.length === 1) {
+      setReason("ไปราชการ");
+    }
     setTeacherReasons(nextReasons);
     setAssignments(nextAssignments);
     saveLocalDraft({
       absentTeacherIds: nextIds,
       selectedDate,
-      reason,
+      reason: nextDefaultReason,
       teacherReasons: nextReasons,
       studentTeacherName,
       includeSupervision,
@@ -433,7 +495,7 @@ export default function App() {
     });
   };
 
-  // เพิ่มครูที่ลาเพิ่มเติมลงในตารางเดียวกัน
+  // เพิ่มครูที่ลาเพิ่มเติมลงในตารางเดียวกัน (ตั้งสถานะครูที่เพิ่มใหม่เป็น "ไปราชการ" เสมอ และบันทึกอัตโนมัติทันที)
   const handleAddAbsentTeacher = (preferredTeacherId?: string) => {
     const usedIds = new Set(absentTeacherIds);
     let targetId = preferredTeacherId || "";
@@ -453,9 +515,9 @@ export default function App() {
         nextReasons[id] = reason || "ไปราชการ";
       }
     });
-    if (!nextReasons[targetId]) {
-      nextReasons[targetId] = reason || "ไปราชการ";
-    }
+    // เมื่อกดเลือกเพิ่มครู ให้ขึ้นสถานะ "ไปราชการ" ก่อนเสมอ
+    nextReasons[targetId] = "ไปราชการ";
+
     const nextAssignments = reconcileCombinedSubstitutes(
       nextIds,
       selectedDate,
@@ -474,11 +536,31 @@ export default function App() {
       includeSupervision,
       assignments: nextAssignments,
     });
+
+    // บันทึกใบสอนแทนที่รวมครูใหม่ลงฐานข้อมูลอัตโนมัติและทันที
+    void persistCombinedRecordToDatabase(
+      nextIds,
+      selectedDate,
+      reason,
+      nextReasons,
+      studentTeacherName,
+      includeSupervision,
+      nextAssignments
+    );
+
+    const addedTeacher = teachers.find((t) => String(t.id) === String(targetId));
+    setSaveToastMessage(
+      `เพิ่ม "${addedTeacher ? `${addedTeacher.id} ${addedTeacher.n}` : targetId}" (ไปราชการ) และบันทึกใบสอนแทนอัตโนมัติเรียบร้อยแล้ว`
+    );
+    window.setTimeout(() => {
+      setSaveToastMessage("");
+    }, 3500);
   };
 
   // ลบครูออกจากตารางเดียวกัน
   const handleRemoveAbsentTeacher = (teacherIdToRemove: string) => {
     if (absentTeacherIds.length <= 1) return;
+    const oldCombinedRecordId = `rec_${absentTeacherIds.join("-")}_${selectedDate.replace(/[^0-9]/g, "")}`;
     const nextIds = absentTeacherIds.filter((id) => id !== teacherIdToRemove);
     const nextAssignments = reconcileCombinedSubstitutes(
       nextIds,
@@ -497,6 +579,19 @@ export default function App() {
       includeSupervision,
       assignments: nextAssignments,
     });
+
+    if (savedRecords.some((r) => r.selectedDate === selectedDate)) {
+      void persistCombinedRecordToDatabase(
+        nextIds,
+        selectedDate,
+        reason,
+        teacherReasons,
+        studentTeacherName,
+        includeSupervision,
+        nextAssignments,
+        oldCombinedRecordId
+      );
+    }
   };
 
   // เปลี่ยนวันที่สอนแทน
@@ -536,6 +631,18 @@ export default function App() {
       includeSupervision,
       assignments,
     });
+    const currentRecId = `rec_${absentTeacherIds.join("-")}_${selectedDate.replace(/[^0-9]/g, "")}`;
+    if (savedRecords.some((r) => r.recordId === currentRecId)) {
+      void persistCombinedRecordToDatabase(
+        absentTeacherIds,
+        selectedDate,
+        newReason,
+        nextReasons,
+        studentTeacherName,
+        includeSupervision,
+        assignments
+      );
+    }
   };
 
   // เปลี่ยนเหตุผลการลารายบุคคล (กรณีมีครูลาหลายท่านและเหตุผลไม่เหมือนกัน)
@@ -562,6 +669,18 @@ export default function App() {
       includeSupervision,
       assignments,
     });
+    const currentRecId = `rec_${absentTeacherIds.join("-")}_${selectedDate.replace(/[^0-9]/g, "")}`;
+    if (savedRecords.some((r) => r.recordId === currentRecId)) {
+      void persistCombinedRecordToDatabase(
+        absentTeacherIds,
+        selectedDate,
+        nextDefaultReason,
+        nextReasons,
+        studentTeacherName,
+        includeSupervision,
+        assignments
+      );
+    }
   };
 
   // เปลี่ยนชื่อนักศึกษาฝึกสอนเพิ่มเติม
@@ -687,7 +806,7 @@ export default function App() {
     });
   };
 
-  // รวมรายชื่อครูที่ลาจากใบที่เคยบันทึกไว้ในวันเดียวกันเข้ากับหน้าจอปัจจุบัน
+  // รวมรายชื่อครูที่ลาจากใบที่เคยบันทึกไว้ในวันเดียวกันเข้ากับหน้าจอปัจจุบัน และบันทึกลงฐานข้อมูลอัตโนมัติทันที
   const handleMergeSavedRecord = (record: SavedSubstituteRecord) => {
     const merged = mergeSubstituteWorkspaceWithRecord(
       absentTeacherIds,
@@ -711,6 +830,18 @@ export default function App() {
       assignments: merged.assignments,
     });
 
+    // บันทึกใบที่รวมแล้วลงฐานข้อมูลอัตโนมัติและทันที พร้อมแทนที่ใบย่อยเดิม
+    void persistCombinedRecordToDatabase(
+      merged.absentTeacherIds,
+      selectedDate,
+      reason,
+      merged.teacherReasons,
+      studentTeacherName,
+      includeSupervision,
+      merged.assignments,
+      record.recordId
+    );
+
     const mergedNames = merged.absentTeacherIds
       .map((id) => {
         const t = teachers.find((item) => String(item.id) === String(id));
@@ -720,8 +851,8 @@ export default function App() {
 
     setSaveToastMessage(
       merged.addedTeacherIds.length > 0
-        ? `รวมรายชื่อครูเข้าใบเดียวกันเรียบร้อยแล้ว (รวม ${merged.absentTeacherIds.length} ท่าน: ${mergedNames})`
-        : `รายชื่อครูในใบนี้ถูกรวมอยู่ในตารางปัจจุบันครบแล้ว (${mergedNames})`
+        ? `รวมรายชื่อครูและบันทึกอัตโนมัติเรียบร้อยแล้ว (รวม ${merged.absentTeacherIds.length} ท่าน: ${mergedNames})`
+        : `บันทึกและอัปเดตใบจัดสอนแทนเรียบร้อยแล้ว (${mergedNames})`
     );
     window.setTimeout(() => {
       setSaveToastMessage("");
@@ -742,7 +873,7 @@ export default function App() {
     const nextIds = [idStr];
     const nextReasons: Record<string, string> = {
       ...teacherReasons,
-      [idStr]: teacherReasons[idStr] || reason || "ไปราชการ",
+      [idStr]: "ไปราชการ",
     };
     const nextAssignments = autoAssignCombinedSubstitutes(
       nextIds,
@@ -750,13 +881,14 @@ export default function App() {
       includeSupervision
     );
     setAbsentTeacherIds(nextIds);
+    setReason("ไปราชการ");
     setTeacherReasons(nextReasons);
     setAssignments(nextAssignments);
     setActiveTab("planner");
     saveLocalDraft({
       absentTeacherIds: nextIds,
       selectedDate,
-      reason,
+      reason: "ไปราชการ",
       teacherReasons: nextReasons,
       studentTeacherName,
       includeSupervision,

@@ -821,15 +821,15 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                                 onMergeSavedRecord(rec);
                                 setStatusMsg({
                                   text: isAlreadyIncluded
-                                    ? `รายชื่อครู (${rec.absentTeacherName}) รวมอยู่ในใบจัดสอนแทนปัจจุบันเรียบร้อยแล้ว`
-                                    : `รวมรายชื่อครู (${rec.absentTeacherName}) เข้าในใบเดียวกันเรียบร้อยแล้ว`,
+                                    ? `บันทึกและอัปเดตใบจัดสอนแทน (${rec.absentTeacherName}) เรียบร้อยแล้ว`
+                                    : `รวมรายชื่อครู (${rec.absentTeacherName}) และบันทึกใบจัดสอนแทนอัตโนมัติเรียบร้อยแล้ว`,
                                   type: "ok",
                                 });
                               }}
                               title={
                                 isAlreadyIncluded
-                                  ? "รายชื่อครูในใบนี้ถูกรวมอยู่ในใบจัดสอนแทนปัจจุบันแล้ว"
-                                  : "นำรายชื่อครูจากใบที่บันทึกไว้ มารวมเข้ากับครูที่เลือกอยู่บนหน้าจอเป็นใบเดียวกัน"
+                                  ? "บันทึกและอัปเดตใบจัดสอนแทนปัจจุบันแล้ว (คลิกเพื่อบันทึกซ้ำได้)"
+                                  : "นำรายชื่อครูจากใบที่บันทึกไว้ มารวมเข้ากับครูที่เลือกอยู่บนหน้าจอและบันทึกอัตโนมัติทันที"
                               }
                               className={`px-2 py-1 rounded text-[11px] font-bold flex items-center gap-1 cursor-pointer transition-colors ${
                                 isAlreadyIncluded
@@ -842,8 +842,8 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                                   <Check className="w-3 h-3" />
                                   <span>
                                     {isExactSameSelection
-                                      ? "กำลังเปิดใบนี้"
-                                      : "รวมอยู่ในใบนี้แล้ว"}
+                                      ? "บันทึกอัตโนมัติแล้ว"
+                                      : "รวมและบันทึกแล้ว"}
                                   </span>
                                 </>
                               ) : (
