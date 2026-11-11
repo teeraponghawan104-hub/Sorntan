@@ -14,6 +14,7 @@ import {
   autoAssignCombinedSubstitutes,
   buildCombinedTeacherHeader,
   computeCumulativeSubCountsExcludingDate,
+  extractRecordTeacherIds,
   extractSubjectNamesFromCoursesSummary,
   formatCombinedReasonsSummary,
   getInitialWeekdayDate,
@@ -694,7 +695,8 @@ export default function App() {
       assignments,
       record,
       selectedDate,
-      includeSupervision
+      includeSupervision,
+      reason
     );
     setAbsentTeacherIds(merged.absentTeacherIds);
     setTeacherReasons(merged.teacherReasons);
@@ -708,6 +710,22 @@ export default function App() {
       includeSupervision,
       assignments: merged.assignments,
     });
+
+    const mergedNames = merged.absentTeacherIds
+      .map((id) => {
+        const t = teachers.find((item) => String(item.id) === String(id));
+        return t ? `${t.id} ${t.n}` : `รหัส ${id}`;
+      })
+      .join(", ");
+
+    setSaveToastMessage(
+      merged.addedTeacherIds.length > 0
+        ? `รวมรายชื่อครูเข้าใบเดียวกันเรียบร้อยแล้ว (รวม ${merged.absentTeacherIds.length} ท่าน: ${mergedNames})`
+        : `รายชื่อครูในใบนี้ถูกรวมอยู่ในตารางปัจจุบันครบแล้ว (${mergedNames})`
+    );
+    window.setTimeout(() => {
+      setSaveToastMessage("");
+    }, 4000);
   };
 
   const handleViewTeacherTimetable = (teacherIdOrIds: number | number[]) => {
@@ -883,10 +901,9 @@ export default function App() {
 
   // CRUD: โหลดใบสอนแทนที่บันทึกไว้กลับมาแก้ไข/พิมพ์
   const handleLoadSubstituteRecord = (record: SavedSubstituteRecord) => {
+    const extracted = extractRecordTeacherIds(record);
     const loadedIds =
-      record.absentTeacherIds && record.absentTeacherIds.length > 0
-        ? record.absentTeacherIds
-        : [String(record.absentTeacherId)];
+      extracted.length > 0 ? extracted : [String(record.absentTeacherId)];
     const loadedAssignments = { ...record.assignments };
     const loadedReasons: Record<string, string> =
       record.teacherReasons && Object.keys(record.teacherReasons).length > 0

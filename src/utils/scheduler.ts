@@ -3220,6 +3220,68 @@ export function autoFixScheduleGridFormat(grid: string[][]): {
 }
 
 /**
+ * ดึงรหัสครูที่ลาทั้งหมดจากใบสอนแทนที่บันทึกไว้ รองรับทั้งใบใหม่ที่มี absentTeacherIds
+ * และใบเก่าที่เก็บรหัสไว้ใน recordId (เช่น rec_102-104_20261102), absentTeacherName, หรือคีย์ใน assignments
+ */
+export function extractRecordTeacherIds(
+  savedRecord: Pick<
+    SubstituteRecordLike,
+    "recordId" | "absentTeacherId" | "absentTeacherIds" | "absentTeacherName" | "assignments"
+  >
+): string[] {
+  const discovered: string[] = [];
+
+  if (Array.isArray(savedRecord.absentTeacherIds) && savedRecord.absentTeacherIds.length > 0) {
+    savedRecord.absentTeacherIds.forEach((id) => {
+      const s = String(id || "").trim();
+      if (/^\d+$/.test(s)) discovered.push(s);
+    });
+  }
+
+  // ดึงจาก recordId เช่น "rec_102-104_20261102"
+  const recIdMatch = String(savedRecord.recordId || "").match(/^rec_([0-9-]+)_\d{6,8}$/);
+  if (recIdMatch && recIdMatch[1]) {
+    recIdMatch[1].split("-").forEach((part) => {
+      const s = part.trim();
+      if (/^\d+$/.test(s)) discovered.push(s);
+    });
+  }
+
+  // ดึงจากคีย์แบบ composite ใน assignments เช่น "102_0", "104_2"
+  Object.keys(savedRecord.assignments || {}).forEach((k) => {
+    const m = k.match(/^(\d+)_\d+$/);
+    if (m && m[1]) {
+      discovered.push(m[1]);
+    }
+  });
+
+  // ดึงจากชื่อครูใน absentTeacherName เช่น "102 นางสาว..., 104 นาย..." หรือเทียบชื่อตรงกับฐานข้อมูลครู
+  const rawName = String(savedRecord.absentTeacherName || "");
+  const idMatches = rawName.match(/\b\d{3}\b/g);
+  if (idMatches) {
+    idMatches.forEach((m) => discovered.push(m));
+  }
+  TEACHERS.forEach((t) => {
+    if (t.n && rawName.includes(t.n)) {
+      discovered.push(String(t.id));
+    }
+  });
+
+  if (savedRecord.absentTeacherId && Number(savedRecord.absentTeacherId) > 0) {
+    discovered.push(String(savedRecord.absentTeacherId));
+  }
+
+  const normalized = discovered
+    .map((id) => (id === "302" ? "305" : id))
+    .filter((id) => {
+      const num = Number(id);
+      return Number.isFinite(num) && num > 0 && !isTeacherExemptFromNeedingSubstitute(num);
+    });
+
+  return Array.from(new Set(normalized));
+}
+
+/**
  * รวมข้อมูลใบสอนแทนที่เคยบันทึกไว้ในวันเดียวกันเข้ากับรายการครูที่กำลังเลือกอยู่บนหน้าจอ
  * โดยรักษาเหตุผลการลารายบุคคลและผู้สอนแทนเดิมของทั้งสองฝั่ง พร้อมป้องกันครูสอนแทนชนกันอัตโนมัติ
  */
@@ -3229,35 +3291,84 @@ export function mergeSubstituteWorkspaceWithRecord(
   currentAssignments: Record<string, string>,
   savedRecord: SubstituteRecordLike & { teacherReasons?: Record<string, string> },
   dateStr: string,
-  includeSupervision = false
+  includeSupervision = false,
+  currentDefaultReason = "ไปราชการ"
 ): {
   absentTeacherIds: string[];
   teacherReasons: Record<string, string>;
   assignments: Record<string, string>;
+  addedTeacherIds: string[];
 } {
-  const savedIds =
-    Array.isArray(savedRecord.absentTeacherIds) && savedRecord.absentTeacherIds.length > 0
-      ? savedRecord.absentTeacherIds.map(String)
-      : [String(savedRecord.absentTeacherId)];
-
-  const mergedIds = Array.from(
-    new Set([...savedIds, ...currentAbsentIds].map((id) => String(id).trim()).filter(Boolean))
+  const cleanCurrentIds = Array.from(
+    new Set(
+      currentAbsentIds
+        .map((id) => (String(id).trim() === "302" ? "305" : String(id).trim()))
+        .filter((id) => id && !isTeacherExemptFromNeedingSubstitute(id))
+    )
   );
+  const savedIds = extractRecordTeacherIds(savedRecord);
+
+  // ให้ครูที่เลือกอยู่บนหน้าจอปัจจุบันขึ้นก่อน แล้วตามด้วยครูจากใบที่นำมารวม
+  const mergedIds = Array.from(new Set([...cleanCurrentIds, ...savedIds]));
+  const addedTeacherIds = savedIds.filter((id) => !cleanCurrentIds.includes(id));
+
+  // แยกเหตุผลการลารายบุคคลจากข้อความรวม เช่น "นางสาวกนกพร (ลากิจ), นายกิตติพงศ์ (ไปราชการ)"
+  const parsedReasonsFromSummary: Record<string, string> = {};
+  const rawSummaryReason = String(savedRecord.reason || "ไปราชการ").trim();
+  savedIds.forEach((id) => {
+    const t = getTeacherById(id);
+    if (!t) return;
+    const escapedName = t.n.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const m = rawSummaryReason.match(new RegExp(`${escapedName}\\s*\\(([^()]+)\\)`));
+    if (m && m[1]) {
+      parsedReasonsFromSummary[id] = m[1].trim();
+    }
+  });
+
+  const fallbackSingleReason =
+    savedIds.length === 1 || !rawSummaryReason.includes("(")
+      ? rawSummaryReason || "ไปราชการ"
+      : "ไปราชการ";
 
   const mergedReasons: Record<string, string> = {};
   savedIds.forEach((id) => {
     mergedReasons[id] =
-      savedRecord.teacherReasons?.[id] || savedRecord.reason || "ไปราชการ";
+      savedRecord.teacherReasons?.[id]?.trim() ||
+      parsedReasonsFromSummary[id] ||
+      fallbackSingleReason;
   });
-  Object.entries(currentReasons).forEach(([id, r]) => {
-    if (r && r.trim()) {
-      mergedReasons[id] = r.trim();
+  cleanCurrentIds.forEach((id) => {
+    const curR = currentReasons[id]?.trim();
+    if (curR) {
+      mergedReasons[id] = curR;
+    } else if (!mergedReasons[id]) {
+      mergedReasons[id] = (currentDefaultReason || "ไปราชการ").trim() || "ไปราชการ";
+    }
+  });
+
+  // แปลงคีย์เดี่ยว ("0".."6") ให้เป็นคีย์คู่ ("${teacherId}_${p}") ทั้งของใบที่บันทึกไว้และของหน้าจอปัจจุบัน
+  // เพื่อไม่ให้ผู้สอนแทนเดิมหลุดเมื่อรวมครูจาก 1 ท่านเป็นหลายท่าน
+  const normalizedSavedAssignments: Record<string, string> = {};
+  Object.entries(savedRecord.assignments || {}).forEach(([k, v]) => {
+    if (!v) return;
+    normalizedSavedAssignments[k] = v;
+    if (/^\d+$/.test(k) && savedIds.length === 1) {
+      normalizedSavedAssignments[`${savedIds[0]}_${k}`] = v;
+    }
+  });
+
+  const normalizedCurrentAssignments: Record<string, string> = {};
+  Object.entries(currentAssignments || {}).forEach(([k, v]) => {
+    if (!v) return;
+    normalizedCurrentAssignments[k] = v;
+    if (/^\d+$/.test(k) && cleanCurrentIds.length === 1) {
+      normalizedCurrentAssignments[`${cleanCurrentIds[0]}_${k}`] = v;
     }
   });
 
   const combinedRawAssignments: Record<string, string> = {
-    ...(savedRecord.assignments || {}),
-    ...currentAssignments,
+    ...normalizedSavedAssignments,
+    ...normalizedCurrentAssignments,
   };
 
   const reconciled = reconcileCombinedSubstitutes(
@@ -3271,6 +3382,7 @@ export function mergeSubstituteWorkspaceWithRecord(
     absentTeacherIds: mergedIds,
     teacherReasons: mergedReasons,
     assignments: reconciled,
+    addedTeacherIds,
   };
 }
 

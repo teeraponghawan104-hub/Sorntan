@@ -1126,6 +1126,7 @@ test("Five school-administration enhancements: partial-day leave (skip), cumulat
     validateTeacherScheduleGrid,
     autoFixScheduleCellFormat,
     autoFixScheduleGridFormat,
+    extractRecordTeacherIds,
     mergeSubstituteWorkspaceWithRecord,
     computeSubstituteStatistics,
     reconcileCombinedSubstitutes,
@@ -1238,7 +1239,15 @@ test("Five school-administration enhancements: partial-day leave (skip), cumulat
     assert.equal(fixedCount, 1);
     assert.equal(autoFixedGrid[0][0], "ว21102 1/1");
 
-    // 5. Same-Date Saved Record Merging
+    // 5. Same-Date Saved Record Merging (including legacy records where absentTeacherIds is omitted)
+    const legacyIds = extractRecordTeacherIds({
+      recordId: "rec_102-104_20261102",
+      absentTeacherId: 102,
+      absentTeacherName: "102 นายรติพงษ์ รักษาพันธุ์, 104 นางสาวพิไลพร พิมพ์พรม",
+      assignments: { "102_0": "t205", "104_1": "t206" },
+    });
+    assert.deepEqual(legacyIds, ["102", "104"]);
+
     const merged = mergeSubstituteWorkspaceWithRecord(
       ["201"],
       { "201": "ลาป่วย" },
@@ -1247,7 +1256,7 @@ test("Five school-administration enhancements: partial-day leave (skip), cumulat
         recordId: "rec_102_20261102",
         absentTeacherId: 102,
         absentTeacherIds: ["102"],
-        absentTeacherName: "ครูศิริพร วงษ์คำจันทร์",
+        absentTeacherName: "ครูรติพงษ์ รักษาพันธุ์",
         selectedDate: "2026-11-02",
         reason: "ไปราชการ",
         teacherReasons: { "102": "ไปราชการ" },
@@ -1257,7 +1266,8 @@ test("Five school-administration enhancements: partial-day leave (skip), cumulat
       },
       "2026-11-02"
     );
-    assert.deepEqual(merged.absentTeacherIds, ["102", "201"]);
+    assert.deepEqual(merged.absentTeacherIds, ["201", "102"]);
+    assert.deepEqual(merged.addedTeacherIds, ["102"]);
     assert.equal(merged.teacherReasons["102"], "ไปราชการ");
     assert.equal(merged.teacherReasons["201"], "ลาป่วย");
     const mergedSlots = getCombinedTeacherClasses(merged.absentTeacherIds, "2026-11-02");

@@ -31,6 +31,7 @@ import {
   doesTeacherTeachGrade,
   doesTeacherTeachPrevPeriodExactClass,
   extractGradeLevel,
+  extractRecordTeacherIds,
   findDoubleBookedSubstitutes,
   formatClassLevelLabel,
   formatCleanSubstituteName,
@@ -775,13 +776,13 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                 </div>
                 <div className="space-y-1.5">
                   {matchingSavedRecordsForDate.map((rec) => {
-                    const recIds =
-                      rec.absentTeacherIds && rec.absentTeacherIds.length > 0
-                        ? rec.absentTeacherIds.map(String)
-                        : [String(rec.absentTeacherId)];
+                    const recIds = extractRecordTeacherIds(rec);
+                    const unmergedIds = recIds.filter((id) => !cleanAbsentIds.includes(id));
                     const isExactSameSelection =
+                      recIds.length > 0 &&
                       recIds.length === cleanAbsentIds.length &&
-                      recIds.every((id) => cleanAbsentIds.includes(id));
+                      unmergedIds.length === 0;
+                    const isAlreadyIncluded = recIds.length > 0 && unmergedIds.length === 0;
 
                     return (
                       <div
@@ -801,21 +802,56 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                         <div className="flex items-center gap-1 shrink-0">
                           <button
                             type="button"
-                            onClick={() => onLoadSavedRecord(rec)}
+                            onClick={() => {
+                              onLoadSavedRecord(rec);
+                              setStatusMsg({
+                                text: `โหลดข้อมูลใบสอนแทน "${rec.absentTeacherName}" เรียบร้อยแล้ว`,
+                                type: "ok",
+                              });
+                            }}
                             className="px-2 py-1 rounded bg-[#1b4fb8] hover:bg-[#153e91] text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer"
                           >
                             <FolderOpen className="w-3 h-3" />
                             <span>เปิดใบเดิม</span>
                           </button>
-                          {!isExactSameSelection && onMergeSavedRecord && (
+                          {onMergeSavedRecord && (
                             <button
                               type="button"
-                              onClick={() => onMergeSavedRecord(rec)}
-                              title="นำรายชื่อครูจากใบที่บันทึกไว้ มารวมเข้ากับครูที่เลือกอยู่บนหน้าจอเป็นใบเดียวกัน"
-                              className="px-2 py-1 rounded bg-[#0b7a4b] hover:bg-[#085c38] text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                              onClick={() => {
+                                onMergeSavedRecord(rec);
+                                setStatusMsg({
+                                  text: isAlreadyIncluded
+                                    ? `รายชื่อครู (${rec.absentTeacherName}) รวมอยู่ในใบจัดสอนแทนปัจจุบันเรียบร้อยแล้ว`
+                                    : `รวมรายชื่อครู (${rec.absentTeacherName}) เข้าในใบเดียวกันเรียบร้อยแล้ว`,
+                                  type: "ok",
+                                });
+                              }}
+                              title={
+                                isAlreadyIncluded
+                                  ? "รายชื่อครูในใบนี้ถูกรวมอยู่ในใบจัดสอนแทนปัจจุบันแล้ว"
+                                  : "นำรายชื่อครูจากใบที่บันทึกไว้ มารวมเข้ากับครูที่เลือกอยู่บนหน้าจอเป็นใบเดียวกัน"
+                              }
+                              className={`px-2 py-1 rounded text-[11px] font-bold flex items-center gap-1 cursor-pointer transition-colors ${
+                                isAlreadyIncluded
+                                  ? "bg-emerald-100 dark:bg-emerald-950/80 text-[#0b7a4b] dark:text-[#4fd39a] border border-emerald-300 dark:border-emerald-700"
+                                  : "bg-[#0b7a4b] hover:bg-[#085c38] text-white"
+                              }`}
                             >
-                              <GitMerge className="w-3 h-3" />
-                              <span>+ รวมครูเข้าใบเดียวกัน</span>
+                              {isAlreadyIncluded ? (
+                                <>
+                                  <Check className="w-3 h-3" />
+                                  <span>
+                                    {isExactSameSelection
+                                      ? "กำลังเปิดใบนี้"
+                                      : "รวมอยู่ในใบนี้แล้ว"}
+                                  </span>
+                                </>
+                              ) : (
+                                <>
+                                  <GitMerge className="w-3 h-3" />
+                                  <span>+ รวมครูเข้าใบเดียวกัน</span>
+                                </>
+                              )}
                             </button>
                           )}
                         </div>
