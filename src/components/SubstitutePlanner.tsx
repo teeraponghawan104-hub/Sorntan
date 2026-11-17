@@ -522,15 +522,20 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
   );
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-[460px_1fr] gap-4 sm:gap-5 items-start w-full">
-      {/* แผงตั้งค่าและจัดคาบสอนแทนด้านซ้าย (แบ่ง 3 ขั้นตอนชัดเจน ใช้งานง่าย) */}
-      <section className="min-w-0 w-full bg-white dark:bg-[#14204a] border border-[#c9d4ec] dark:border-[#2a3a6e] rounded-xl p-4 sm:p-5 shadow-xs print:hidden space-y-4">
+    <div className="grid grid-cols-1 lg:grid-cols-[440px_1fr] xl:grid-cols-[460px_1fr] gap-4 sm:gap-5 items-start w-full">
+      {/* แผงตั้งค่าและจัดคาบสอนแทนด้านซ้าย */}
+      <section className="min-w-0 w-full bg-white dark:bg-[#111827] border border-slate-200/90 dark:border-slate-800 rounded-xl p-4 sm:p-5 shadow-[0_1px_2px_rgba(15,23,42,0.04)] print:hidden space-y-5">
         {/* ส่วนหัวแผงจัดสอนแทน */}
-        <div className="flex items-center justify-between gap-2 pb-3 border-b border-[#c9d4ec] dark:border-[#2a3a6e] flex-wrap">
-          <h2 className="text-lg sm:text-xl font-bold text-[#0f2150] dark:text-[#e9eefc]">
-            จัดครูสอนแทน
-          </h2>
-          <div className="flex items-center gap-2">
+        <div className="flex items-center justify-between gap-2 pb-3.5 border-b border-slate-100 dark:border-slate-800 flex-wrap">
+          <div>
+            <h2 className="text-base sm:text-lg font-bold text-slate-900 dark:text-slate-50 tracking-tight">
+              จัดครูสอนแทน
+            </h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              เลือกครูที่ลา วันที่ และตรวจสอบรายคาบ
+            </p>
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0">
             {selectedAbsentTeachers.length > 0 && (
               <button
                 type="button"
@@ -541,12 +546,12 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                 title={`เปิดดูตารางสอนของครูที่ลา (${selectedAbsentTeachers
                   .map((t) => t.n)
                   .join(", ")})`}
-                className="text-xs font-semibold px-2.5 py-1.5 rounded-md border border-[#c9d4ec] dark:border-[#2a3a6e] text-[#1b4fb8] dark:text-[#6c97ff] hover:bg-[#eaf0fa] dark:hover:bg-blue-950 flex items-center gap-1 cursor-pointer whitespace-nowrap"
+                className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:border-blue-300 hover:text-blue-700 dark:hover:text-blue-400 flex items-center gap-1 cursor-pointer whitespace-nowrap transition-colors"
               >
-                <Table2 className="w-3.5 h-3.5" />
+                <Table2 className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
                 <span>
                   {selectedAbsentTeachers.length > 1
-                    ? `ดูตารางสอน (${selectedAbsentTeachers.length} ท่าน)`
+                    ? `ดูตาราง (${selectedAbsentTeachers.length})`
                     : "ดูตารางสอน"}
                 </span>
               </button>
@@ -554,28 +559,28 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
             <button
               type="button"
               onClick={onOpenDatabaseTab}
-              className="text-xs font-semibold px-2.5 py-1.5 rounded-md bg-[#eaf0fa] dark:bg-[#0b1330] text-[#1b4fb8] dark:text-[#6c97ff] hover:bg-blue-200 dark:hover:bg-blue-950 flex items-center gap-1 cursor-pointer whitespace-nowrap"
+              className="text-xs font-semibold px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 flex items-center gap-1 cursor-pointer whitespace-nowrap transition-colors"
             >
-              <Database className="w-3.5 h-3.5" />
-              <span>ฐานข้อมูล / ปีการศึกษา</span>
+              <Database className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+              <span>ฐานข้อมูล</span>
             </button>
           </div>
         </div>
 
         {/* ขั้นตอนที่ 1: เลือกครูที่ลา */}
-        <div className="p-3.5 rounded-lg bg-[#f8faff] dark:bg-[#0b1330]/60 border border-[#c9d4ec] dark:border-[#2a3a6e] space-y-2.5">
+        <div className="space-y-2.5">
           <div className="flex items-center justify-between gap-2">
             <label
               htmlFor="ta"
-              className="text-sm font-bold text-[#0f2150] dark:text-[#e9eefc] flex items-center gap-1.5"
+              className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2"
             >
-              <span className="inline-flex items-center justify-center w-5 h-5 rounded-md bg-[#1b4fb8] text-white text-xs font-bold">
+              <span className="inline-flex items-center justify-center w-5 h-5 rounded-md bg-blue-700 text-white text-[11px] font-bold tabular-nums">
                 1
               </span>
               <span>เลือกครูที่ลา / ติดราชการ</span>
             </label>
             {selectedAbsentTeachers.length > 1 && (
-              <span className="text-xs font-bold text-[#1b4fb8] dark:text-[#6c97ff]">
+              <span className="text-xs font-semibold text-blue-700 dark:text-blue-400 tabular-nums">
                 เลือก {selectedAbsentTeachers.length} ท่าน
               </span>
             )}
@@ -585,7 +590,7 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
             id="ta"
             value={primaryTeacherId}
             onChange={(e) => onChangePrimaryTeacherId(e.target.value)}
-            className="w-full max-w-full px-3 py-2 rounded-lg border border-[#c9d4ec] dark:border-[#2a3a6e] bg-white dark:bg-[#0b1330] text-[#0f2150] dark:text-[#e9eefc] text-sm font-semibold focus:outline-2 focus:outline-[#f2c230]"
+            className="w-full max-w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600"
           >
             <option value="">— เลือกครูผู้สอน —</option>
             {DEPARTMENT_GROUPS.map((group) => {
@@ -612,8 +617,8 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
             )}
           </select>
 
-          {/* รายชื่อครูที่เลือกในใบเดียวกัน + ปุ่มเพิ่มครูที่ลา */}
-          <div className="space-y-2 pt-1">
+          {/* รายชื่อครูที่เลือกในใบเดียวกัน + เพิ่มครูที่ลา */}
+          <div className="space-y-2 pt-0.5">
             {selectedAbsentTeachers.length > 0 && (
               <div className="flex flex-wrap gap-1.5">
                 {selectedAbsentTeachers.map((t) => {
@@ -626,7 +631,7 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                   return (
                     <span
                       key={t.id}
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white dark:bg-[#14204a] border border-[#c9d4ec] dark:border-[#2a3a6e] text-xs font-medium text-[#0f2150] dark:text-[#e9eefc]"
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-slate-50 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700 text-xs font-medium text-slate-800 dark:text-slate-100"
                     >
                       <button
                         type="button"
@@ -634,12 +639,12 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                         title={`คลิกเพื่อดูตารางสอนของ ${t.id} ${t.n}`}
                         className="inline-flex items-center gap-1 hover:underline cursor-pointer text-left"
                       >
-                        <span className="text-[#1b4fb8] dark:text-[#6c97ff] font-bold">
+                        <span className="font-mono text-blue-700 dark:text-blue-400 font-bold">
                           {t.id}
                         </span>
                         <span className="font-semibold">{t.n}</span>
-                        <span className="text-[#51608a] dark:text-[#9fb0dc] text-[11px]">
-                          ({tClasses.length} คาบ{selectedAbsentTeachers.length > 1 ? ` · ${tReason}` : ""})
+                        <span className="text-slate-500 dark:text-slate-400 text-[11px] tabular-nums">
+                          · {tClasses.length} คาบ{selectedAbsentTeachers.length > 1 ? ` · ${tReason}` : ""}
                         </span>
                       </button>
                       {selectedAbsentTeachers.length > 1 && (
@@ -658,8 +663,8 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
               </div>
             )}
 
-            <div className="flex items-center gap-1.5">
-              <UserPlus className="w-3.5 h-3.5 text-[#1b4fb8] dark:text-[#6c97ff] shrink-0" />
+            <div className="flex items-center gap-2">
+              <UserPlus className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
               <select
                 id="add-teacher-select"
                 aria-label="เลือกครูที่ลาเพิ่มเติมในตารางเดียวกัน"
@@ -670,10 +675,10 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                     setAddingTeacherPickerOpen(true);
                   }
                 }}
-                className="w-full px-2.5 py-1.5 rounded-md border border-[#c9d4ec] dark:border-[#2a3a6e] bg-white dark:bg-[#14204a] text-[#0f2150] dark:text-[#e9eefc] text-xs font-medium focus:outline-2 focus:outline-[#f2c230]"
+                className="w-full px-2.5 py-1.5 rounded-lg border border-dashed border-slate-300 dark:border-slate-700 bg-slate-50/60 dark:bg-slate-900 text-slate-700 dark:text-slate-200 text-xs font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600"
               >
                 <option value="">
-                  + เพิ่มครูที่ลาเพิ่มเติมในใบเดียวกัน (กรณีลาพร้อมกันหลายท่าน)...
+                  + เพิ่มครูที่ลาเพิ่มเติมในใบเดียวกัน...
                 </option>
                 {DEPARTMENT_GROUPS.map((group) => {
                   const groupTeachers = availableTeachersToAdd.filter(
@@ -707,13 +712,13 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
         </div>
 
         {/* ขั้นตอนที่ 2: กำหนดวันที่และภารกิจ */}
-        <div className="p-3.5 rounded-lg bg-[#f8faff] dark:bg-[#0b1330]/60 border border-[#c9d4ec] dark:border-[#2a3a6e] space-y-3">
+        <div className="pt-4 border-t border-slate-100 dark:border-slate-800 space-y-3">
           <div className="flex items-center justify-between gap-2 flex-wrap">
             <label
               htmlFor="dt"
-              className="text-sm font-bold text-[#0f2150] dark:text-[#e9eefc] flex items-center gap-1.5"
+              className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2"
             >
-              <span className="inline-flex items-center justify-center w-5 h-5 rounded-md bg-[#1b4fb8] text-white text-xs font-bold">
+              <span className="inline-flex items-center justify-center w-5 h-5 rounded-md bg-blue-700 text-white text-[11px] font-bold tabular-nums">
                 2
               </span>
               <span>เลือกวันที่และเหตุผลการลา</span>
@@ -730,9 +735,9 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                       )
                     )
                   }
-                  className="px-2 py-0.5 rounded-md bg-amber-100 dark:bg-amber-950 text-amber-900 dark:text-amber-200 border border-amber-300 dark:border-amber-700 text-xs font-bold cursor-pointer hover:bg-amber-200"
+                  className="px-2 py-0.5 rounded-md bg-amber-50 dark:bg-amber-950 text-amber-800 dark:text-amber-200 border border-amber-200 dark:border-amber-700 text-xs font-semibold cursor-pointer hover:bg-amber-100"
                 >
-                  ปรับปีวันที่เป็น พ.ศ. {academicSettings.academicYear}
+                  ปรับปีเป็น พ.ศ. {academicSettings.academicYear}
                 </button>
               )}
           </div>
@@ -743,20 +748,20 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
               id="dt"
               value={selectedDate}
               onChange={(e) => onChangeDate(e.target.value)}
-              className="block w-full max-w-full min-w-0 appearance-none px-3 py-2 rounded-lg border border-[#c9d4ec] dark:border-[#2a3a6e] bg-white dark:bg-[#0b1330] text-[#0f2150] dark:text-[#e9eefc] text-sm font-semibold focus:outline-2 focus:outline-[#f2c230]"
+              className="block w-full max-w-full min-w-0 appearance-none px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600"
             />
 
             {/* ปุ่มลัดเลือกวันจันทร์-ศุกร์ */}
-            <div className="grid grid-cols-5 gap-1.5 mt-2">
+            <div className="grid grid-cols-5 gap-1.5 mt-2 bg-slate-100 dark:bg-slate-800/70 p-1 rounded-xl border border-slate-200/80 dark:border-slate-700">
               {DAYS.map((dayName, idx) => (
                 <button
                   key={dayName}
                   type="button"
                   onClick={() => jumpToWeekday(idx)}
-                  className={`py-1.5 px-1 rounded-md text-xs font-bold text-center transition-colors cursor-pointer whitespace-nowrap ${
+                  className={`py-1.5 px-1 rounded-lg text-xs font-semibold text-center transition-all cursor-pointer whitespace-nowrap ${
                     dayIdx === idx
-                      ? "bg-[#1b4fb8] text-white shadow-2xs"
-                      : "bg-white dark:bg-[#14204a] border border-[#c9d4ec] dark:border-[#2a3a6e] text-[#0f2150] dark:text-[#9fb0dc] hover:bg-blue-100 dark:hover:bg-blue-900"
+                      ? "bg-white dark:bg-slate-900 text-blue-700 dark:text-blue-400 shadow-xs ring-1 ring-slate-200/80 dark:ring-slate-700"
+                      : "text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white"
                   }`}
                 >
                   {dayName}
@@ -766,11 +771,11 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
 
             {/* แจ้งเตือนเมื่อวันที่เลือกมีใบสอนแทนบันทึกอยู่ในประวัติแล้ว */}
             {matchingSavedRecordsForDate.length > 0 && (
-              <div className="mt-2.5 p-2.5 rounded-lg bg-amber-50 dark:bg-amber-950/50 border border-amber-300 dark:border-amber-700/80 space-y-2">
-                <div className="flex items-start gap-1.5 text-xs text-amber-900 dark:text-amber-200">
+              <div className="mt-3 p-3 rounded-xl bg-amber-50/80 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/80 space-y-2">
+                <div className="flex items-start gap-2 text-xs text-amber-900 dark:text-amber-200">
                   <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0 mt-0.5" />
                   <div className="font-semibold">
-                    วันที่ {formatThaiDate(selectedDate)} มีใบสอนแทนบันทึกไว้ในประวัติแล้ว (
+                    วันที่ {formatThaiDate(selectedDate)} มีใบสอนแทนในประวัติแล้ว (
                     {matchingSavedRecordsForDate.length} รายการ)
                   </div>
                 </div>
@@ -787,19 +792,19 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                     return (
                       <div
                         key={rec.recordId}
-                        className="flex flex-wrap items-center justify-between gap-1.5 p-2 rounded-md bg-white/90 dark:bg-[#14204a] border border-amber-200 dark:border-amber-800 text-xs"
+                        className="flex flex-wrap items-center justify-between gap-1.5 p-2 rounded-lg bg-white dark:bg-slate-900 border border-amber-200/80 dark:border-amber-800/60 text-xs"
                       >
                         <div className="min-w-0">
-                          <span className="font-bold text-[#0f2150] dark:text-[#e9eefc]">
+                          <span className="font-bold text-slate-900 dark:text-slate-100">
                             {/^\d{3}\s/.test(rec.absentTeacherName)
                               ? rec.absentTeacherName
                               : `${rec.absentTeacherId} ${rec.absentTeacherName}`}
                           </span>
-                          <span className="text-[#51608a] dark:text-[#9fb0dc] ml-1">
+                          <span className="text-slate-500 dark:text-slate-400 ml-1">
                             ({rec.reason})
                           </span>
                         </div>
-                        <div className="flex items-center gap-1 shrink-0">
+                        <div className="flex items-center gap-1.5 shrink-0">
                           <button
                             type="button"
                             onClick={() => {
@@ -809,7 +814,7 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                                 type: "ok",
                               });
                             }}
-                            className="px-2 py-1 rounded bg-[#1b4fb8] hover:bg-[#153e91] text-white text-[11px] font-bold flex items-center gap-1 cursor-pointer"
+                            className="px-2.5 py-1 rounded-md bg-blue-700 hover:bg-blue-800 text-white text-[11px] font-semibold flex items-center gap-1 cursor-pointer"
                           >
                             <FolderOpen className="w-3 h-3" />
                             <span>เปิดใบเดิม</span>
@@ -831,10 +836,10 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                                   ? "บันทึกและอัปเดตใบจัดสอนแทนปัจจุบันแล้ว (คลิกเพื่อบันทึกซ้ำได้)"
                                   : "นำรายชื่อครูจากใบที่บันทึกไว้ มารวมเข้ากับครูที่เลือกอยู่บนหน้าจอและบันทึกอัตโนมัติทันที"
                               }
-                              className={`px-2 py-1 rounded text-[11px] font-bold flex items-center gap-1 cursor-pointer transition-colors ${
+                              className={`px-2.5 py-1 rounded-md text-[11px] font-semibold flex items-center gap-1 cursor-pointer transition-colors ${
                                 isAlreadyIncluded
-                                  ? "bg-emerald-100 dark:bg-emerald-950/80 text-[#0b7a4b] dark:text-[#4fd39a] border border-emerald-300 dark:border-emerald-700"
-                                  : "bg-[#0b7a4b] hover:bg-[#085c38] text-white"
+                                  ? "bg-emerald-50 dark:bg-emerald-950/80 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-700"
+                                  : "bg-emerald-700 hover:bg-emerald-800 text-white"
                               }`}
                             >
                               {isAlreadyIncluded ? (
@@ -863,12 +868,12 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
             )}
           </div>
 
-          {/* เหตุผล / ภารกิจ (รองรับทั้งครูท่านเดียว และแยกเหตุผลรายบุคคลเมื่อมีครูลาหลายท่าน) */}
+          {/* เหตุผล / ภารกิจ */}
           {selectedAbsentTeachers.length <= 1 ? (
             <div>
               <label
                 htmlFor="wy"
-                className="block text-xs font-bold text-[#0f2150] dark:text-[#e9eefc] mb-1"
+                className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1"
               >
                 เหตุผล / ภารกิจ (แสดงในช่องหมายเหตุ)
               </label>
@@ -888,9 +893,9 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                   }
                 }}
                 placeholder="พิมพ์เหตุผลการลา หรือเลือกปุ่มลัดด้านล่าง เช่น ไปราชการ, ลากิจ, ลาป่วย"
-                className="w-full px-3 py-1.5 text-sm rounded-lg border border-[#c9d4ec] dark:border-[#2a3a6e] bg-white dark:bg-[#0b1330] text-[#0f2150] dark:text-[#e9eefc] focus:outline-2 focus:outline-[#f2c230]"
+                className="w-full px-3 py-2 text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600"
               />
-              <div className="flex flex-wrap gap-1 mt-1.5">
+              <div className="flex flex-wrap gap-1.5 mt-2">
                 {REASON_PRESETS.map((preset) => {
                   const activeReason =
                     primaryTeacherId && teacherReasons[primaryTeacherId] !== undefined
@@ -906,10 +911,10 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                           onChangeTeacherReason(primaryTeacherId, preset);
                         }
                       }}
-                      className={`px-2 py-0.5 rounded-md text-xs transition-colors cursor-pointer ${
+                      className={`px-2.5 py-1 rounded-md text-xs transition-colors cursor-pointer ${
                         activeReason === preset
-                          ? "bg-[#1b4fb8] text-white font-semibold"
-                          : "bg-white dark:bg-[#14204a] border border-[#c9d4ec] dark:border-[#2a3a6e] text-[#51608a] dark:text-[#9fb0dc] hover:text-[#0f2150]"
+                          ? "bg-blue-700 text-white font-semibold"
+                          : "bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 font-medium"
                       }`}
                     >
                       {preset}
@@ -919,10 +924,10 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
               </div>
             </div>
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-2.5">
               <div className="flex items-center justify-between gap-2 flex-wrap">
-                <span className="text-xs font-bold text-[#0f2150] dark:text-[#e9eefc]">
-                  เหตุผล / ภารกิจ แยกรายบุคคล (แสดงในช่องหมายเหตุของครูแต่ละท่าน)
+                <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  เหตุผล / ภารกิจ แยกรายบุคคล
                 </span>
               </div>
 
@@ -934,19 +939,19 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                   return (
                     <div
                       key={t.id}
-                      className="p-2.5 rounded-lg bg-white dark:bg-[#14204a] border border-[#c9d4ec] dark:border-[#2a3a6e] space-y-1.5"
+                      className="p-2.5 rounded-xl bg-slate-50/70 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-700/80 space-y-2"
                     >
                       <div className="flex items-center justify-between gap-2">
                         <label
                           htmlFor={`wy-${t.id}`}
-                          className="text-xs font-bold text-[#0f2150] dark:text-[#e9eefc] flex items-center gap-1.5"
+                          className="text-xs font-bold text-slate-900 dark:text-slate-100 flex items-center gap-1.5"
                         >
-                          <span className="px-1.5 py-0.5 rounded bg-[#eaf0fa] dark:bg-[#0b1330] text-[#1b4fb8] dark:text-[#6c97ff] font-bold">
+                          <span className="font-mono text-blue-700 dark:text-blue-400">
                             {t.id}
                           </span>
                           <span>{t.n}</span>
                         </label>
-                        <span className="text-[11px] text-[#51608a] dark:text-[#9fb0dc]">
+                        <span className="text-[11px] text-slate-500 dark:text-slate-400">
                           {t.pdfGroup}
                         </span>
                       </div>
@@ -962,8 +967,8 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                             onChangeReason(e.target.value);
                           }
                         }}
-                        placeholder="พิมพ์เหตุผลการลา หรือกดเลือกปุ่มลัดด้านล่าง..."
-                        className="w-full px-2.5 py-1.5 text-xs sm:text-sm rounded-md border border-[#c9d4ec] dark:border-[#2a3a6e] bg-[#f8faff] dark:bg-[#0b1330] text-[#0f2150] dark:text-[#e9eefc] focus:outline-2 focus:outline-[#f2c230]"
+                        placeholder="พิมพ์เหตุผลการลา..."
+                        className="w-full px-2.5 py-1.5 text-xs sm:text-sm rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600"
                       />
                       <div className="flex flex-wrap gap-1">
                         {REASON_PRESETS.map((preset) => (
@@ -977,10 +982,10 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                                 onChangeReason(preset);
                               }
                             }}
-                            className={`px-2 py-0.5 rounded text-[11px] transition-colors cursor-pointer ${
+                            className={`px-2 py-0.5 rounded-md text-[11px] transition-colors cursor-pointer ${
                               currentTeacherReason === preset
-                                ? "bg-[#1b4fb8] text-white font-semibold"
-                                : "bg-[#f8faff] dark:bg-[#0b1330] border border-[#c9d4ec] dark:border-[#2a3a6e] text-[#51608a] dark:text-[#9fb0dc] hover:text-[#0f2150]"
+                                ? "bg-blue-700 text-white font-semibold"
+                                : "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:text-slate-900"
                             }`}
                           >
                             {preset}
@@ -988,16 +993,16 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                         ))}
                       </div>
                       {onApplyLeavePeriodMode && (
-                        <div className="flex items-center gap-1 flex-wrap pt-1 border-t border-[#c9d4ec]/60 dark:border-[#2a3a6e]/60">
-                          <span className="text-[11px] font-semibold text-[#51608a] dark:text-[#9fb0dc] flex items-center gap-1">
+                        <div className="flex items-center gap-1 flex-wrap pt-1.5 border-t border-slate-200/60 dark:border-slate-700/60">
+                          <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400 flex items-center gap-1">
                             <Clock className="w-3 h-3" />
-                            <span>ช่วงเวลาลา:</span>
+                            <span>ช่วงเวลา:</span>
                           </span>
                           {(
                             [
                               { mode: "full" as const, label: "เต็มวัน" },
-                              { mode: "morning" as const, label: "ครึ่งเช้า (คาบ 1-4)" },
-                              { mode: "afternoon" as const, label: "ครึ่งบ่าย (คาบ 5-7)" },
+                              { mode: "morning" as const, label: "ครึ่งเช้า (1-4)" },
+                              { mode: "afternoon" as const, label: "ครึ่งบ่าย (5-7)" },
                             ]
                           ).map((item) => {
                             const tLeaveMode = detectLeavePeriodMode(
@@ -1012,10 +1017,10 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                                 key={item.mode}
                                 type="button"
                                 onClick={() => onApplyLeavePeriodMode(item.mode, t.id)}
-                                className={`px-2 py-0.5 rounded text-[11px] transition-colors cursor-pointer ${
+                                className={`px-2 py-0.5 rounded-md text-[11px] transition-colors cursor-pointer ${
                                   tLeaveMode === item.mode
-                                    ? "bg-[#0b7a4b] text-white font-bold"
-                                    : "bg-[#f8faff] dark:bg-[#0b1330] border border-[#c9d4ec] dark:border-[#2a3a6e] text-[#51608a] dark:text-[#9fb0dc]"
+                                    ? "bg-emerald-700 text-white font-semibold"
+                                    : "bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300"
                                 }`}
                               >
                                 {item.label}
@@ -1030,15 +1035,15 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
               </div>
 
               <div className="flex items-center gap-1.5 flex-wrap pt-0.5">
-                <span className="text-[11px] font-semibold text-[#51608a] dark:text-[#9fb0dc]">
-                  ตั้งให้เหมือนกันทุกคน:
+                <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                  ตั้งเหมือนกันทั้งหมด:
                 </span>
                 {REASON_PRESETS.map((preset) => (
                   <button
                     key={`all-${preset}`}
                     type="button"
                     onClick={() => onChangeReason(preset)}
-                    className="px-2 py-0.5 rounded bg-white dark:bg-[#14204a] border border-[#c9d4ec] dark:border-[#2a3a6e] text-[11px] text-[#1b4fb8] dark:text-[#6c97ff] hover:bg-[#eaf0fa] dark:hover:bg-blue-950 font-semibold cursor-pointer"
+                    className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-[11px] text-blue-700 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-slate-700 font-semibold cursor-pointer"
                   >
                     {preset}
                   </button>
@@ -1047,12 +1052,12 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
             </div>
           )}
 
-          {/* ช่องระบุชื่อ นศ.ฝึกสอน เพิ่มเติม (แสดงเฉพาะเมื่อมีการเลือกตัวเลือก "นักศึกษาฝึกสอน (ระบุชื่อเอง)" ในคาบเรียน) */}
+          {/* ช่องระบุชื่อ นศ.ฝึกสอน เพิ่มเติม */}
           {hasCustomStudentTeacherSelected && (
             <div>
               <label
                 htmlFor="sn"
-                className="block text-xs font-bold text-[#0f2150] dark:text-[#e9eefc] mb-1"
+                className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1"
               >
                 ระบุชื่อนักศึกษาฝึกสอน
               </label>
@@ -1062,19 +1067,19 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                 value={studentTeacherName}
                 onChange={(e) => onChangeStudentTeacherName(e.target.value)}
                 placeholder="พิมพ์ชื่อ-สกุล นักศึกษาฝึกสอน"
-                className="w-full px-2.5 py-1.5 text-xs rounded-md border border-[#c9d4ec] dark:border-[#2a3a6e] bg-white dark:bg-[#0b1330] text-[#0f2150] dark:text-[#e9eefc] focus:outline-2 focus:outline-[#f2c230]"
+                className="w-full px-3 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600"
               />
             </div>
           )}
 
           {/* ตัวเลือกเสริมสำหรับฝ่ายบริหารที่มีคาบนิเทศสอน */}
           {hasSupervisionSlots && (
-            <label className="flex items-center gap-2 pt-1 text-xs font-semibold text-[#0f2150] dark:text-[#e9eefc] cursor-pointer">
+            <label className="flex items-center gap-2 pt-1 text-xs font-semibold text-slate-700 dark:text-slate-200 cursor-pointer">
               <input
                 type="checkbox"
                 checked={includeSupervision}
                 onChange={(e) => onChangeIncludeSupervision(e.target.checked)}
-                className="rounded border-[#c9d4ec] text-[#1b4fb8]"
+                className="rounded border-slate-300 text-blue-700"
               />
               <span>รวมคาบนิเทศสอนในใบมอบหมายงานด้วย</span>
             </label>
@@ -1084,11 +1089,11 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
         {/* ขั้นตอนที่ 3: รายการคาบสอนที่ต้องจัดคนแทน */}
         <div
           id="plan"
-          className="p-3.5 rounded-lg bg-[#f8faff] dark:bg-[#0b1330]/60 border border-[#c9d4ec] dark:border-[#2a3a6e] space-y-3"
+          className="pt-4 border-t border-slate-100 dark:border-slate-800 space-y-3"
         >
           <div className="flex items-center justify-between gap-2 flex-wrap">
-            <div className="text-sm font-bold text-[#0f2150] dark:text-[#e9eefc] flex items-center gap-1.5">
-              <span className="inline-flex items-center justify-center w-5 h-5 rounded-md bg-[#1b4fb8] text-white text-xs font-bold">
+            <div className="text-sm font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
+              <span className="inline-flex items-center justify-center w-5 h-5 rounded-md bg-blue-700 text-white text-[11px] font-bold tabular-nums">
                 3
               </span>
               <span>ตรวจสอบ / เลือกครูสอนแทนรายคาบ</span>
@@ -1097,7 +1102,7 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
               type="button"
               id="au"
               onClick={onResetAutoAssign}
-              className="flex items-center gap-1 px-2.5 py-1 rounded-md border border-[#1b4fb8] dark:border-[#6c97ff] text-[#1b4fb8] dark:text-[#6c97ff] hover:bg-[#1b4fb8] hover:text-white font-semibold text-xs transition-colors cursor-pointer"
+              className="flex items-center gap-1 px-2.5 py-1 rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50/70 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400 hover:bg-blue-700 hover:text-white font-semibold text-xs transition-colors cursor-pointer whitespace-nowrap"
             >
               <RefreshCw className="w-3 h-3 shrink-0" />
               <span>จัดอัตโนมัติใหม่</span>
@@ -1105,29 +1110,29 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
           </div>
 
           {selectedAbsentTeachers.length === 0 ? (
-            <p className="text-[#51608a] dark:text-[#9fb0dc] text-sm">
+            <p className="text-slate-500 dark:text-slate-400 text-sm">
               กรุณาเลือกครูที่ลาในขั้นตอนที่ 1
             </p>
           ) : !selectedDate ? (
-            <p className="text-[#51608a] dark:text-[#9fb0dc] text-sm">
+            <p className="text-slate-500 dark:text-slate-400 text-sm">
               กรุณาเลือกวันที่ต้องการจัดสอนแทน
             </p>
           ) : dayIdx < 0 ? (
             <div className="p-3 rounded-lg bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800/60">
-              <p className="text-[#b3261e] dark:text-[#ff8b82] font-semibold text-sm">
+              <p className="text-red-700 dark:text-red-300 font-semibold text-sm">
                 วันที่เลือกตรงกับวันเสาร์–อาทิตย์ ไม่มีคาบสอน กรุณาเลือกวันจันทร์–ศุกร์
               </p>
             </div>
           ) : combinedClasses.length === 0 ? (
-            <div className="p-3 rounded-lg bg-white dark:bg-[#14204a] border border-[#c9d4ec] dark:border-[#2a3a6e] space-y-1.5">
-              <p className="text-[#0f2150] dark:text-[#e9eefc] font-semibold text-sm">
+            <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-800 space-y-1.5">
+              <p className="text-slate-800 dark:text-slate-100 font-semibold text-sm">
                 <b>{selectedAbsentTeachers.map((t) => t.n).join(", ")}</b>{" "}
                 {studentCoveredClasses.length > 0
                   ? `ไม่ต้องจัดสอนแทนในวัน${DAYS[dayIdx]} (นักศึกษาฝึกสอนสอนประจำวิชาแล้ว)`
                   : `ไม่มีคาบสอนวิชาปกติในวัน${DAYS[dayIdx]}`}
               </p>
               {studentCoveredClasses.length > 0 && (
-                <div className="text-xs text-[#0b7a4b] dark:text-[#4fd39a] space-y-0.5 pt-1 border-t border-[#c9d4ec] dark:border-[#2a3a6e]">
+                <div className="text-xs text-emerald-700 dark:text-emerald-400 space-y-0.5 pt-1 border-t border-slate-200 dark:border-slate-700">
                   {studentCoveredClasses.map((sc) => (
                     <div key={`${sc.absentTeacherId}_${sc.p}`}>
                       • คาบที่ {sc.p + 1} <b>{sc.code}</b> ({sc.subjectName}) ม.{sc.cls} —{" "}
@@ -1139,34 +1144,34 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
             </div>
           ) : (
             <div className="space-y-2.5">
-              {/* ปุ่มลัดเลือกช่วงเวลาการลา (เต็มวัน / ครึ่งเช้า คาบ 1-4 / ครึ่งบ่าย คาบ 5-7) */}
+              {/* ปุ่มลัดเลือกช่วงเวลาการลา */}
               {onApplyLeavePeriodMode && (
-                <div className="p-2.5 rounded-lg bg-white dark:bg-[#14204a] border border-[#c9d4ec] dark:border-[#2a3a6e] space-y-1.5">
+                <div className="p-2.5 rounded-xl bg-slate-50 dark:bg-slate-900/50 border border-slate-200 dark:border-slate-800 space-y-2">
                   <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <span className="text-xs font-bold text-[#0f2150] dark:text-[#e9eefc] flex items-center gap-1.5">
-                      <Clock className="w-3.5 h-3.5 text-[#1b4fb8] dark:text-[#6c97ff]" />
-                      <span>ช่วงเวลาที่ต้องการจัดสอนแทน:</span>
+                    <span className="text-xs font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
+                      <Clock className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                      <span>ช่วงเวลาจัดสอนแทน</span>
                     </span>
-                    <span className="text-[11px] text-[#51608a] dark:text-[#9fb0dc]">
-                      จัดสอนแทน {docRows.length} จาก {combinedClasses.length} คาบ
+                    <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400 tabular-nums">
+                      จัดแทน {docRows.length} / {combinedClasses.length} คาบ
                     </span>
                   </div>
-                  <div className="grid grid-cols-3 gap-1.5">
+                  <div className="grid grid-cols-3 gap-1 bg-slate-200/70 dark:bg-slate-800 p-0.5 rounded-lg">
                     {(
                       [
-                        { mode: "full" as const, label: "ลาเต็มวัน (ทุกคาบ)" },
-                        { mode: "morning" as const, label: "ครึ่งเช้า (คาบ 1–4)" },
-                        { mode: "afternoon" as const, label: "ครึ่งบ่าย (คาบ 5–7)" },
+                        { mode: "full" as const, label: "เต็มวัน (ทุกคาบ)" },
+                        { mode: "morning" as const, label: "ครึ่งเช้า (1–4)" },
+                        { mode: "afternoon" as const, label: "ครึ่งบ่าย (5–7)" },
                       ]
                     ).map((item) => (
                       <button
                         key={item.mode}
                         type="button"
                         onClick={() => onApplyLeavePeriodMode(item.mode)}
-                        className={`py-1.5 px-2 rounded-md text-xs font-bold transition-colors cursor-pointer text-center ${
+                        className={`py-1.5 px-1.5 rounded-md text-xs font-semibold transition-all cursor-pointer text-center whitespace-nowrap ${
                           overallLeaveMode === item.mode
-                            ? "bg-[#1b4fb8] text-white shadow-2xs"
-                            : "bg-[#f8faff] dark:bg-[#0b1330] border border-[#c9d4ec] dark:border-[#2a3a6e] text-[#0f2150] dark:text-[#9fb0dc] hover:bg-blue-50 dark:hover:bg-blue-950"
+                            ? "bg-white dark:bg-slate-900 text-blue-700 dark:text-blue-400 shadow-2xs"
+                            : "text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white"
                         }`}
                       >
                         {item.label}
@@ -1176,21 +1181,21 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                 </div>
               )}
 
-              {/* แจ้งเตือนกรณีผู้ใช้เลือกครูสอนแทนชนกันในคาบเดียวกัน พร้อมปุ่มแก้ไขในคลิกเดียว */}
+              {/* แจ้งเตือนกรณีผู้ใช้เลือกครูสอนแทนชนกันในคาบเดียวกัน */}
               {doubleBookingConflicts.length > 0 && (
-                <div className="p-2.5 rounded-lg bg-red-50 dark:bg-red-950/60 border border-red-300 dark:border-red-700 space-y-1.5">
+                <div className="p-3 rounded-xl bg-red-50 dark:bg-red-950/60 border border-red-200 dark:border-red-800 space-y-1.5">
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex items-start gap-1.5 text-xs text-red-800 dark:text-red-200 font-bold">
                       <AlertTriangle className="w-4 h-4 text-red-600 dark:text-red-400 shrink-0 mt-0.5" />
                       <span>
-                        พบการเลือกครูสอนแทนคนเดียวกันซ้ำในเวลาเดียวกัน ({doubleBookingConflicts.length} คาบ):
+                        พบการเลือกครูสอนแทนซ้ำในคาบเดียวกัน ({doubleBookingConflicts.length} คาบ):
                       </span>
                     </div>
                     {onResolveDoubleBooking && (
                       <button
                         type="button"
                         onClick={onResolveDoubleBooking}
-                        className="px-2.5 py-1 rounded-md bg-red-600 hover:bg-red-700 text-white text-xs font-bold shrink-0 cursor-pointer shadow-2xs"
+                        className="px-2.5 py-1 rounded-md bg-red-600 hover:bg-red-700 text-white text-xs font-semibold shrink-0 cursor-pointer"
                       >
                         แก้คาบชนอัตโนมัติ
                       </button>
@@ -1207,28 +1212,27 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                 </div>
               )}
 
-              <div className="text-xs font-semibold text-[#51608a] dark:text-[#9fb0dc]">
+              <div className="text-xs font-medium text-slate-500 dark:text-slate-400">
                 {selectedAbsentTeachers.length === 1 ? (
                   <>
-                    <span>{selectedAbsentTeachers[0].n}</span> · มี{" "}
-                    <b className="text-[#0f2150] dark:text-[#e9eefc]">{combinedClasses.length} คาบ</b>{" "}
-                    ในวัน{DAYS[dayIdx]} ({formatThaiDate(selectedDate)})
+                    <span className="font-semibold text-slate-800 dark:text-slate-200">
+                      {selectedAbsentTeachers[0].n}
+                    </span>{" "}
+                    · {combinedClasses.length} คาบ · วัน{DAYS[dayIdx]} ({formatThaiDate(selectedDate)})
                   </>
                 ) : (
                   <>
-                    <span>
-                      รวมทั้งหมด{" "}
-                      <b className="text-[#0f2150] dark:text-[#e9eefc]">
-                        {combinedClasses.length} คาบ
-                      </b>{" "}
-                      ในวัน{DAYS[dayIdx]} (จากครูที่ลา {selectedAbsentTeachers.length} ท่าน)
-                    </span>
+                    รวม{" "}
+                    <b className="text-slate-900 dark:text-slate-100">
+                      {combinedClasses.length} คาบ
+                    </b>{" "}
+                    ในวัน{DAYS[dayIdx]} (ครูลา {selectedAbsentTeachers.length} ท่าน)
                   </>
                 )}
               </div>
 
               {studentCoveredClasses.length > 0 && (
-                <div className="p-2.5 rounded-lg bg-emerald-50/80 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60 text-xs text-[#0b7a4b] dark:text-[#4fd39a] space-y-0.5">
+                <div className="p-2.5 rounded-xl bg-emerald-50/70 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800/60 text-xs text-emerald-800 dark:text-emerald-300 space-y-0.5">
                   <div className="font-bold">
                     ตัดคาบที่นักศึกษาฝึกสอนสอนอยู่แล้วออกอัตโนมัติ ({studentCoveredClasses.length} คาบ):
                   </div>
@@ -1242,7 +1246,6 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
               )}
 
               {combinedClasses.map((slot) => {
-                // ตรวจสอบว่ามีครูคนไหนถูกเลือกให้สอนแทนคาบอื่นในคาบเรียนเดียวกัน (slot.p) ไปแล้วบ้าง เพื่อแสดงป้ายเตือนในตัวเลือก
                 const otherSlotBySubIdInSamePeriod = new Map<number, CombinedClassSlot>();
                 combinedClasses.forEach((otherSlot) => {
                   if (otherSlot.slotKey === slot.slotKey) return;
@@ -1340,78 +1343,90 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                 return (
                   <div
                     key={slot.slotKey}
-                    className={`p-2.5 rounded-lg border space-y-1.5 transition-colors ${
+                    className={`p-3 rounded-xl border space-y-2 transition-colors ${
                       isSkipped
-                        ? "bg-slate-50/80 dark:bg-[#0b1330]/40 border-dashed border-slate-300 dark:border-slate-700 opacity-75"
+                        ? "bg-slate-50 dark:bg-slate-900/30 border-dashed border-slate-300 dark:border-slate-700 opacity-75"
                         : isDoubleBookedSlot
-                        ? "bg-red-50/70 dark:bg-red-950/30 border-red-400 dark:border-red-700"
-                        : "bg-white dark:bg-[#14204a] border-[#c9d4ec] dark:border-[#2a3a6e]"
+                        ? "bg-red-50/70 dark:bg-red-950/30 border-red-300 dark:border-red-700"
+                        : "bg-slate-50/60 dark:bg-slate-900/50 border-slate-200 dark:border-slate-700/80"
                     }`}
                   >
-                    <div className="flex items-center justify-between gap-2 text-xs sm:text-sm flex-wrap">
-                      <div className="flex items-center gap-1.5 flex-wrap min-w-0">
-                        <span
-                          className={`px-2 py-0.5 rounded-md font-bold text-xs ${
-                            isSkipped
-                              ? "bg-slate-400 dark:bg-slate-700 text-white line-through"
-                              : "bg-[#12307a] text-white"
-                          }`}
-                        >
-                          คาบที่ {slot.p + 1}
-                        </span>
-                        <span className="text-xs text-[#51608a] dark:text-[#9fb0dc]">
-                          ({slot.tm})
-                        </span>
-                        <span className="font-bold text-[#1b4fb8] dark:text-[#6c97ff]">
-                          {slot.code}
-                        </span>
-                        <span className="text-[#0f2150] dark:text-[#e9eefc] font-semibold">
-                          {subjectTitle}
-                        </span>
-                        <span className="px-1.5 py-0.5 rounded-md bg-[#eaf0fa] dark:bg-[#0b1330] font-bold text-[#0f2150] dark:text-[#e9eefc] text-xs">
-                          ม.{slot.cls}
-                        </span>
-                        {selectedAbsentTeachers.length > 1 && (
-                          <span className="px-1.5 py-0.5 rounded-md bg-amber-50 dark:bg-amber-950/60 text-xs font-semibold text-amber-900 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
-                            แทน {slot.absentTeacherName} ({resolveTeacherReason(slot.absentTeacherId, reason, teacherReasons)})
+                    <div className="flex items-start justify-between gap-2 text-xs sm:text-sm">
+                      <div className="min-w-0 space-y-0.5">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span
+                            className={`font-bold text-xs tabular-nums ${
+                              isSkipped
+                                ? "text-slate-400 line-through"
+                                : "text-blue-700 dark:text-blue-400"
+                            }`}
+                          >
+                            คาบที่ {slot.p + 1}
                           </span>
-                        )}
+                          <span className="text-[11px] text-slate-400 tabular-nums">
+                            ({slot.tm})
+                          </span>
+                          <span className="text-slate-300 dark:text-slate-600">·</span>
+                          <span className="font-mono font-bold text-xs text-slate-800 dark:text-slate-200">
+                            {slot.code}
+                          </span>
+                          <span className="font-semibold text-xs text-slate-900 dark:text-slate-100">
+                            {subjectTitle}
+                          </span>
+                        </div>
+                        <div className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-1.5 flex-wrap">
+                          <span className="font-semibold text-slate-700 dark:text-slate-300">
+                            ชั้น ม.{slot.cls}
+                          </span>
+                          <span>·</span>
+                          <span>{formatRoomLabel(slot.room)}</span>
+                          {selectedAbsentTeachers.length > 1 && (
+                            <>
+                              <span>·</span>
+                              <span className="font-medium text-amber-700 dark:text-amber-300">
+                                แทน {slot.absentTeacherName} (
+                                {resolveTeacherReason(
+                                  slot.absentTeacherId,
+                                  reason,
+                                  teacherReasons
+                                )}
+                                )
+                              </span>
+                            </>
+                          )}
+                        </div>
                       </div>
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <span className="text-xs text-[#51608a] dark:text-[#9fb0dc] whitespace-nowrap">
-                          {formatRoomLabel(slot.room)}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            if (isSkipped) {
-                              const firstAvail = candidates.find(
-                                (c) => !otherSlotBySubIdInSamePeriod.has(c.id)
-                              );
-                              onChangeAssignment(
-                                slot.slotKey,
-                                slot.p,
-                                firstAvail ? `t${firstAvail.id}` : "s"
-                              );
-                            } else {
-                              onChangeAssignment(slot.slotKey, slot.p, "skip");
-                            }
-                          }}
-                          title={
-                            isSkipped
-                              ? "นำคาบนี้กลับมาจัดครูสอนแทน"
-                              : "ตัดคาบนี้ออก (กรณีครูผู้สอนมาสอนเองในคาบนี้ / ลาไม่เต็มวัน)"
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (isSkipped) {
+                            const firstAvail = candidates.find(
+                              (c) => !otherSlotBySubIdInSamePeriod.has(c.id)
+                            );
+                            onChangeAssignment(
+                              slot.slotKey,
+                              slot.p,
+                              firstAvail ? `t${firstAvail.id}` : "s"
+                            );
+                          } else {
+                            onChangeAssignment(slot.slotKey, slot.p, "skip");
                           }
-                          className={`px-2 py-0.5 rounded text-[11px] font-semibold flex items-center gap-1 cursor-pointer transition-colors ${
-                            isSkipped
-                              ? "bg-[#1b4fb8] text-white hover:bg-[#153e91]"
-                              : "bg-slate-100 dark:bg-[#0b1330] text-[#51608a] dark:text-[#9fb0dc] hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/50 border border-[#c9d4ec] dark:border-[#2a3a6e]"
-                          }`}
-                        >
-                          <Ban className="w-3 h-3" />
-                          <span>{isSkipped ? "นำกลับมาจัดแทน" : "ครูสอนเอง"}</span>
-                        </button>
-                      </div>
+                        }}
+                        title={
+                          isSkipped
+                            ? "นำคาบนี้กลับมาจัดครูสอนแทน"
+                            : "ตัดคาบนี้ออก (กรณีครูผู้สอนมาสอนเองในคาบนี้ / ลาไม่เต็มวัน)"
+                        }
+                        className={`px-2 py-1 rounded-md text-[11px] font-semibold flex items-center gap-1 cursor-pointer transition-colors whitespace-nowrap shrink-0 ${
+                          isSkipped
+                            ? "bg-blue-700 text-white hover:bg-blue-800"
+                            : "bg-white dark:bg-slate-800 text-slate-500 dark:text-slate-300 hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/50 border border-slate-200 dark:border-slate-700"
+                        }`}
+                      >
+                        <Ban className="w-3 h-3" />
+                        <span>{isSkipped ? "นำกลับมาจัด" : "ครูสอนเอง"}</span>
+                      </button>
                     </div>
 
                     <select
@@ -1422,12 +1437,12 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                       onChange={(e) =>
                         onChangeAssignment(slot.slotKey, slot.p, e.target.value)
                       }
-                      className={`w-full max-w-full px-2.5 py-1.5 rounded-md border text-sm font-medium focus:outline-2 focus:outline-[#f2c230] ${
+                      className={`w-full max-w-full px-2.5 py-1.5 rounded-lg border text-xs sm:text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 ${
                         isSkipped
-                          ? "border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-900 text-slate-600 dark:text-slate-400"
+                          ? "border-slate-200 dark:border-slate-700 bg-slate-100 dark:bg-slate-900 text-slate-500 dark:text-slate-400"
                           : isDoubleBookedSlot
-                          ? "border-red-400 dark:border-red-600 bg-white dark:bg-[#0b1330] text-red-700 dark:text-red-300"
-                          : "border-[#c9d4ec] dark:border-[#2a3a6e] bg-[#f8faff] dark:bg-[#0b1330] text-[#0f2150] dark:text-[#e9eefc]"
+                          ? "border-red-400 dark:border-red-600 bg-white dark:bg-slate-900 text-red-700 dark:text-red-300"
+                          : "border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
                       }`}
                     >
                       {prevContinuousRegular.length > 0 && (
@@ -1545,13 +1560,13 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
           )}
 
           {/* ปุ่มคัดลอกแจ้ง LINE และปุ่มบันทึกประวัติลงฐานข้อมูล */}
-          <div className="pt-2 border-t border-[#c9d4ec] dark:border-[#2a3a6e] grid grid-cols-2 gap-2">
+          <div className="pt-3 border-t border-slate-100 dark:border-slate-800 grid grid-cols-2 gap-2">
             <button
               type="button"
               id="btn-copy-line"
               disabled={!canExport}
               onClick={handleCopyLineNotification}
-              className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-[#0b7a4b] dark:border-[#4fd39a] text-[#0b7a4b] dark:text-[#4fd39a] hover:bg-emerald-50 dark:hover:bg-emerald-950/50 disabled:opacity-40 font-bold text-xs sm:text-sm transition-colors cursor-pointer whitespace-nowrap"
+              className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-emerald-200 dark:border-emerald-800 bg-emerald-50/70 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 dark:hover:bg-emerald-950/60 disabled:opacity-40 font-semibold text-xs sm:text-sm transition-colors cursor-pointer whitespace-nowrap"
             >
               {copiedLine ? (
                 <>
@@ -1569,7 +1584,7 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
               type="button"
               disabled={!canExport || isSavingRecord}
               onClick={handleSaveToDatabase}
-              className="flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-lg bg-[#0b7a4b] hover:bg-[#085c38] disabled:opacity-40 text-white font-bold text-xs sm:text-sm transition-colors cursor-pointer shadow-xs whitespace-nowrap"
+              className="flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-lg bg-emerald-700 hover:bg-emerald-800 disabled:opacity-40 text-white font-semibold text-xs sm:text-sm transition-colors cursor-pointer shadow-2xs whitespace-nowrap"
             >
               <Save className="w-4 h-4 shrink-0" />
               <span>{isSavingRecord ? "กำลังบันทึก..." : "บันทึกประวัติ"}</span>
@@ -1579,15 +1594,15 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
 
         {/* รายการใบสอนแทนที่บันทึกไว้ล่าสุด */}
         {savedRecords.length > 0 && (
-          <div className="pt-2 border-t border-[#c9d4ec] dark:border-[#2a3a6e]">
-            <div className="flex items-center justify-between mb-1.5">
-              <span className="text-xs font-bold text-[#0f2150] dark:text-[#e9eefc]">
+          <div className="pt-4 border-t border-slate-100 dark:border-slate-800">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-bold text-slate-700 dark:text-slate-200">
                 ประวัติที่บันทึกไว้ล่าสุด ({savedRecords.length})
               </span>
               <button
                 type="button"
                 onClick={onOpenDatabaseTab}
-                className="text-xs font-semibold text-[#1b4fb8] dark:text-[#6c97ff] hover:underline cursor-pointer"
+                className="text-xs font-semibold text-blue-700 dark:text-blue-400 hover:underline cursor-pointer"
               >
                 จัดการทั้งหมด
               </button>
@@ -1596,15 +1611,15 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
               {savedRecords.slice(0, 4).map((rec) => (
                 <div
                   key={rec.recordId}
-                  className="flex items-center justify-between gap-2 p-2 rounded-md bg-[#f8faff] dark:bg-[#0b1330]/60 border border-[#c9d4ec] dark:border-[#2a3a6e] text-xs"
+                  className="flex items-center justify-between gap-2 px-2.5 py-2 rounded-lg bg-slate-50 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800 text-xs"
                 >
                   <div className="min-w-0 truncate">
-                    <span className="font-semibold text-[#0f2150] dark:text-[#e9eefc]">
+                    <span className="font-semibold text-slate-900 dark:text-slate-100">
                       {/^\d{3}\s/.test(rec.absentTeacherName)
                         ? rec.absentTeacherName
                         : `${rec.absentTeacherId} ${rec.absentTeacherName}`}
                     </span>{" "}
-                    <span className="text-[#51608a] dark:text-[#9fb0dc] text-[11px]">
+                    <span className="text-slate-500 dark:text-slate-400 text-[11px]">
                       · {formatThaiDate(rec.selectedDate)}
                     </span>
                   </div>
@@ -1613,7 +1628,7 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                       type="button"
                       onClick={() => onLoadSavedRecord(rec)}
                       title="โหลดมาแก้ไข"
-                      className="px-2 py-0.5 rounded-md bg-[#1b4fb8] text-white text-xs font-semibold flex items-center gap-1 cursor-pointer"
+                      className="px-2 py-0.5 rounded-md bg-blue-700 hover:bg-blue-800 text-white text-xs font-semibold flex items-center gap-1 cursor-pointer"
                     >
                       <FolderOpen className="w-3 h-3" />
                       <span>เปิด</span>
@@ -1622,7 +1637,7 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                       type="button"
                       onClick={() => onDeleteSavedRecord(rec.recordId)}
                       title="ลบ"
-                      className="p-1 rounded-md text-red-500 hover:bg-red-100 dark:hover:bg-red-950/60 cursor-pointer"
+                      className="p-1 rounded-md text-slate-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/60 cursor-pointer"
                     >
                       <Trash2 className="w-3 h-3" />
                     </button>
@@ -1634,36 +1649,36 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
         )}
       </section>
 
-      {/* แผงแสดงตัวอย่างเอกสารใบสอนแทน (A4) ด้านขวา */}
-      <section className="min-w-0 w-full bg-white dark:bg-[#14204a] border border-[#c9d4ec] dark:border-[#2a3a6e] rounded-xl p-3 sm:p-5 shadow-xs">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 mb-3 print:hidden">
-          <div className="flex items-center gap-2 flex-wrap min-w-0">
-            <h2 className="text-base sm:text-lg font-bold text-[#0f2150] dark:text-[#e9eefc]">
+      {/* แผงแสดงตัวอย่างเอกสารใบสอนแทน (A4 Studio Preview) ด้านขวา */}
+      <section className="min-w-0 w-full bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 sm:p-6 shadow-xs flex flex-col">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 mb-4 border-b border-slate-100 dark:border-slate-800 print:hidden">
+          <div className="flex items-center gap-3 flex-wrap min-w-0">
+            <h2 className="text-base sm:text-lg font-bold tracking-tight text-slate-900 dark:text-slate-100">
               ตัวอย่างแบบบันทึกการจัดสอนแทน
             </h2>
             {selectedAbsentTeachers.length > 1 && (
-              <span className="text-xs px-2 py-0.5 rounded-md bg-blue-100 dark:bg-blue-950 text-[#1b4fb8] dark:text-[#6c97ff] font-bold">
-                รวม {selectedAbsentTeachers.length} ท่าน
+              <span className="text-xs font-medium text-blue-700 dark:text-blue-400 tabular-nums">
+                · รวม {selectedAbsentTeachers.length} ท่าน
               </span>
             )}
             {previewDataUrl && (
               <button
                 type="button"
                 onClick={() => setFullscreenImageOpen(true)}
-                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-[#eaf0fa] dark:bg-[#0b1330] text-[#1b4fb8] dark:text-[#6c97ff] hover:bg-blue-200 dark:hover:bg-blue-950 font-semibold cursor-pointer whitespace-nowrap text-xs"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 font-medium cursor-pointer whitespace-nowrap shrink-0 text-xs transition-colors"
               >
-                <Maximize2 className="w-3 h-3" />
+                <Maximize2 className="w-3.5 h-3.5" />
                 <span>ขยายเต็มจอ</span>
               </button>
             )}
           </div>
-          <div className="grid grid-cols-3 sm:flex items-center gap-1.5 shrink-0">
+          <div className="grid grid-cols-3 sm:flex items-center gap-2 shrink-0">
             <button
               type="button"
               id="bw"
               disabled={!canExport || isExporting}
               onClick={() => handleExport("word")}
-              className="flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-lg bg-[#1b4fb8] hover:bg-[#153e91] disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs sm:text-sm font-bold transition-colors cursor-pointer whitespace-nowrap shadow-2xs"
+              className="flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-lg bg-blue-700 hover:bg-blue-800 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs sm:text-sm font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0 shadow-xs"
             >
               <FileText className="w-4 h-4 shrink-0" />
               <span>Word (.docx)</span>
@@ -1673,7 +1688,7 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
               id="bp"
               disabled={!canExport || isExporting}
               onClick={() => handleExport("pdf")}
-              className="flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-lg bg-[#12307a] hover:bg-[#0d2259] disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs sm:text-sm font-bold transition-colors cursor-pointer whitespace-nowrap shadow-2xs"
+              className="flex items-center justify-center gap-1.5 px-3.5 py-2 rounded-lg bg-slate-900 hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-xs sm:text-sm font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0 shadow-xs"
             >
               <FileDown className="w-4 h-4 shrink-0" />
               <span>PDF</span>
@@ -1683,9 +1698,9 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
               id="bi"
               disabled={!canExport || isExporting}
               onClick={() => handleExport("image")}
-              className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-[#1b4fb8] dark:border-[#6c97ff] text-[#1b4fb8] dark:text-[#6c97ff] hover:bg-[#eaf0fa] dark:hover:bg-blue-950 disabled:opacity-40 disabled:cursor-not-allowed text-xs sm:text-sm font-bold transition-colors cursor-pointer whitespace-nowrap"
+              className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-40 disabled:cursor-not-allowed text-xs sm:text-sm font-semibold transition-colors cursor-pointer whitespace-nowrap shrink-0"
             >
-              <ImageIcon className="w-4 h-4 shrink-0" />
+              <ImageIcon className="w-4 h-4 shrink-0 text-blue-700 dark:text-blue-400" />
               <span>รูปภาพ</span>
             </button>
           </div>
@@ -1695,70 +1710,70 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
           <div
             id="msg"
             role="status"
-            className={`mb-3 text-base font-semibold print:hidden ${
+            className={`mb-4 px-3.5 py-2 rounded-lg text-sm font-medium print:hidden border ${
               statusMsg.type === "err"
-                ? "text-[#b3261e] dark:text-[#ff8b82]"
+                ? "bg-red-50/70 dark:bg-red-950/30 border-red-200 dark:border-red-900 text-red-700 dark:text-red-300"
                 : statusMsg.type === "ok"
-                ? "text-[#0b7a4b] dark:text-[#4fd39a]"
-                : "text-[#1b4fb8] dark:text-[#6c97ff]"
+                ? "bg-emerald-50/70 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-900 text-emerald-700 dark:text-emerald-300"
+                : "bg-blue-50/70 dark:bg-blue-950/30 border-blue-200 dark:border-blue-900 text-blue-700 dark:text-blue-300"
             }`}
           >
             {statusMsg.text}
           </div>
         )}
 
-        {/* กระดาษ A4 แนวนอน ตัวอย่างแบบบันทึกการจัดสอนแทน (รูปแบบตามภาพที่ 1 เป๊ะ 100%) */}
-        <div className="bg-slate-100 dark:bg-[#0b1330] p-2 sm:p-4 md:p-5 rounded-lg border border-[#c9d4ec] dark:border-[#2a3a6e] print:p-0 print:bg-white print:border-0">
+        {/* กระดาษ A4 แนวนอน ตัวอย่างแบบบันทึกการจัดสอนแทนบน Studio Drafting Desk */}
+        <div className="studio-desk-bg p-3 sm:p-5 md:p-7 rounded-xl border border-slate-200/80 dark:border-slate-800 print:p-0 print:bg-white print:border-0">
           <div
             id="paper"
             ref={paperRef}
-            className="paper-sheet w-full max-w-[1123px] bg-white text-black mx-auto shadow-md print:shadow-none relative overflow-hidden"
+            className="paper-sheet w-full max-w-[1123px] bg-white text-black mx-auto shadow-[0_12px_32px_-8px_rgba(15,23,42,0.18),0_2px_8px_rgba(15,23,42,0.06)] print:shadow-none relative overflow-hidden rounded-sm"
           >
             {!combinedHeaderTeacher || dayIdx < 0 || docRows.length === 0 ? (
-              <div className="text-center py-32 px-6 text-neutral-500 min-h-[540px] flex flex-col items-center justify-center">
-                <div className="flex items-center justify-center gap-6 mb-4 opacity-70">
+              <div className="text-center py-28 sm:py-36 px-6 text-slate-500 min-h-[540px] flex flex-col items-center justify-center bg-white">
+                <div className="flex items-center justify-center gap-6 mb-5 opacity-80">
                   <img
                     src={LEFT_SCHOOL_LOGO_URL}
                     alt="ตราโรงเรียนวรคุณอุปถัมภ์"
                     referrerPolicy="no-referrer"
-                    className="h-[84px] w-auto object-contain"
+                    className="h-[80px] w-auto object-contain"
                   />
                   <img
                     src={RIGHT_OBEC_LOGO_URL}
-                    alt="ตราองค์กรหมายเลข 1"
+                    alt="ตราสำนักงานคณะกรรมการการศึกษาขั้นพื้นฐาน"
                     referrerPolicy="no-referrer"
-                    className="h-[78px] w-auto object-contain"
+                    className="h-[74px] w-auto object-contain"
                   />
                 </div>
-                <p className="text-xl font-semibold">
+                <p className="text-lg sm:text-xl font-semibold text-slate-800 max-w-md text-balance">
                   เลือกครูและวันที่ที่มีคาบสอน เพื่อแสดงแบบบันทึกการจัดสอนแทน
                 </p>
-                <p className="text-base mt-1">
+                <p className="text-sm mt-2 text-slate-500">
                   โรงเรียนวรคุณอุปถัมภ์ · {formatThaiMonthYearHeader(selectedDate)}
                 </p>
               </div>
             ) : (
               <>
                 {previewPages.length > 0 && (
-                  <div className="space-y-4">
+                  <div className="space-y-5">
                     {previewPages.map((pageUrl, pIdx) => (
                       <div
                         key={pIdx}
-                        className="relative bg-white shadow-md rounded overflow-hidden"
+                        className="relative bg-white shadow-sm rounded-sm overflow-hidden"
                       >
                         {previewPages.length > 1 && (
-                          <div className="flex flex-wrap items-center justify-between gap-1.5 px-3 py-1.5 bg-slate-100 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 text-xs font-semibold text-slate-700 dark:text-slate-200 print:hidden">
-                            <span>
+                          <div className="flex flex-wrap items-center justify-between gap-2 px-3.5 py-2 bg-slate-50 dark:bg-slate-800 border-b border-slate-200 dark:border-slate-700 text-xs font-medium text-slate-700 dark:text-slate-200 print:hidden">
+                            <span className="tabular-nums">
                               หน้า {pIdx + 1} จาก {previewPages.length}
                             </span>
                             <button
                               type="button"
                               disabled={isExporting}
                               onClick={() => handleDownloadSinglePage(pIdx)}
-                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-white dark:bg-[#14204a] hover:bg-blue-50 dark:hover:bg-blue-900 border border-[#c9d4ec] dark:border-[#2a3a6e] text-[#1b4fb8] dark:text-[#6c97ff] text-xs font-medium cursor-pointer shadow-2xs transition-colors"
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white dark:bg-slate-900 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-blue-700 dark:text-blue-400 text-xs font-semibold cursor-pointer transition-colors whitespace-nowrap shrink-0"
                               title={`ดาวน์โหลดเฉพาะรูปภาพหน้า ${pIdx + 1}`}
                             >
-                              <ImageIcon className="w-3 h-3 shrink-0" />
+                              <ImageIcon className="w-3.5 h-3.5 shrink-0" />
                               <span>โหลดรูปหน้า {pIdx + 1}</span>
                             </button>
                           </div>
@@ -1794,7 +1809,7 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                     </div>
                     <img
                       src={RIGHT_OBEC_LOGO_URL}
-                      alt="ตราองค์กรหมายเลข 1"
+                      alt="ตราสำนักงานคณะกรรมการการศึกษาขั้นพื้นฐาน"
                       className="h-[84px] w-auto object-contain"
                     />
                   </div>
@@ -1910,10 +1925,10 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
         <div
           role="dialog"
           aria-modal="true"
-          className="fixed inset-0 z-50 bg-black/85 flex flex-col items-center justify-start p-3 sm:p-6 overflow-y-auto"
+          className="fixed inset-0 z-50 bg-slate-950/90 flex flex-col items-center justify-start p-3 sm:p-6 overflow-y-auto"
         >
-          <div className="w-full max-w-[1123px] flex flex-wrap items-center justify-between gap-2 mb-3 text-white sticky top-0 z-10 bg-black/75 backdrop-blur-xs py-2 px-3 rounded-lg">
-            <span className="text-xs sm:text-sm font-semibold">
+          <div className="w-full max-w-[1123px] flex flex-wrap items-center justify-between gap-2 mb-4 text-white sticky top-0 z-10 bg-slate-900/90 backdrop-blur-md py-2.5 px-4 rounded-xl border border-white/10">
+            <span className="text-xs sm:text-sm font-semibold tabular-nums">
               {previewPages.length > 1
                 ? `แบบบันทึกการจัดสอนแทน (${previewPages.length} หน้า · ความละเอียดสูง)`
                 : "แบบบันทึกการจัดสอนแทน (ความละเอียดสูง)"}
@@ -1923,7 +1938,7 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
                 type="button"
                 disabled={isExporting}
                 onClick={() => handleExport("image")}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#1b4fb8] hover:bg-[#153e91] text-white text-xs sm:text-sm font-bold cursor-pointer shrink-0 shadow-xs"
+                className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white text-xs sm:text-sm font-semibold cursor-pointer shrink-0 whitespace-nowrap transition-colors"
               >
                 <ImageIcon className="w-4 h-4" />
                 <span>ดาวน์โหลดรูปชัดพิเศษ (Ultra HD)</span>
@@ -1931,23 +1946,23 @@ export const SubstitutePlanner: React.FC<SubstitutePlannerProps> = ({
               <button
                 type="button"
                 onClick={() => setFullscreenImageOpen(false)}
-                className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-white/20 hover:bg-white/30 text-white text-xs sm:text-sm font-bold cursor-pointer shrink-0"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs sm:text-sm font-semibold cursor-pointer shrink-0 whitespace-nowrap transition-colors"
               >
                 <X className="w-4 h-4" />
                 <span>ปิด</span>
               </button>
             </div>
           </div>
-          <div className="w-full max-w-[1123px] space-y-4">
+          <div className="w-full max-w-[1123px] space-y-5">
             {(previewPages.length > 0 ? previewPages : [previewDataUrl]).map((pageUrl, pIdx) => (
               <div key={pIdx} className="bg-white rounded-lg overflow-hidden shadow-2xl">
                 {previewPages.length > 1 && (
-                  <div className="flex items-center justify-between px-4 py-2 bg-slate-100 text-slate-800 text-xs font-semibold border-b border-slate-200">
-                    <span>หน้า {pIdx + 1} จาก {previewPages.length}</span>
+                  <div className="flex items-center justify-between px-4 py-2.5 bg-slate-50 text-slate-800 text-xs font-medium border-b border-slate-200">
+                    <span className="tabular-nums">หน้า {pIdx + 1} จาก {previewPages.length}</span>
                     <button
                       type="button"
                       onClick={() => handleDownloadSinglePage(pIdx)}
-                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded bg-[#1b4fb8] text-white hover:bg-[#153e91] text-xs font-medium cursor-pointer"
+                      className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md bg-blue-700 text-white hover:bg-blue-800 text-xs font-semibold cursor-pointer whitespace-nowrap"
                     >
                       <FileDown className="w-3.5 h-3.5" />
                       <span>ดาวน์โหลดหน้านี้</span>

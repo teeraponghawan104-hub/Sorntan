@@ -59,6 +59,11 @@ import {
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>("planner");
+  const [databaseFocusTarget, setDatabaseFocusTarget] = useState<{
+    subTab: "teachers" | "subjects" | "records";
+    scrollToRecordsList?: boolean;
+    nonce: number;
+  } | null>(null);
   const [darkMode, setDarkMode] = useState<boolean>(false);
 
   // รายชื่อครูทั้งหมด, ประวัติใบสอนแทน, รหัสวิชา และปีการศึกษาจากฐานข้อมูลกลาง
@@ -1192,12 +1197,20 @@ export default function App() {
     }
   };
 
+  const regularTeacherCount = teachers.filter((t) => !t.isStudentTeacher).length;
+  const studentTeacherCount = teachers.filter((t) => Boolean(t.isStudentTeacher)).length;
+  const semesterDisplayLabel =
+    academicSettings.semester === "ฤดูร้อน"
+      ? "ภาคฤดูร้อน"
+      : `ภาคเรียนที่ ${academicSettings.semester}`;
+
   return (
-    <div className="min-h-screen w-full overflow-x-hidden bg-[#eaf0fa] dark:bg-[#0b1330] text-[#0f2150] dark:text-[#e9eefc] transition-colors">
+    <div className="min-h-screen flex flex-col w-full overflow-x-hidden bg-slate-50 dark:bg-[#090D16] text-slate-900 dark:text-slate-100 transition-colors">
       <Header
         activeTab={activeTab}
         onSelectTab={(tab) => {
           if (tab !== "timetables") setFocusTimetableTeacherIds([]);
+          setDatabaseFocusTarget(null);
           setActiveTab(tab);
         }}
         darkMode={darkMode}
@@ -1206,17 +1219,79 @@ export default function App() {
         academicSettings={academicSettings}
       />
 
-      <main className="max-w-[1360px] mx-auto p-3 sm:p-4 md:p-5">
+      <main className="flex-1 w-full max-w-[1400px] mx-auto px-3 sm:px-5 lg:px-6 py-4 sm:py-5 space-y-4">
+        {/* แถบสรุปสถานะภาพรวมของโรงเรียน (ข้อมูลจริงจากฐานข้อมูล) */}
+        <section
+          aria-label="ภาพรวมข้อมูลระบบ"
+          className="bg-white dark:bg-[#111827] border border-slate-200/90 dark:border-slate-800 rounded-xl px-4 py-3 shadow-[0_1px_2px_rgba(15,23,42,0.04)] grid grid-cols-2 lg:grid-cols-4 gap-3.5 lg:gap-0 lg:divide-x lg:divide-slate-200 dark:lg:divide-slate-800 print:hidden"
+        >
+          <div className="lg:pr-5 flex flex-col gap-0.5 min-w-0">
+            <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+              บุคลากรในฐานข้อมูล
+            </span>
+            <span className="text-sm font-bold text-slate-900 dark:text-slate-50 tabular-nums whitespace-nowrap">
+              {teachers.length} ท่าน
+              <span className="font-medium text-xs text-slate-500 dark:text-slate-400 ml-1.5">
+                (ครู {regularTeacherCount} · นศ. {studentTeacherCount})
+              </span>
+            </span>
+          </div>
+
+          <div className="lg:px-5 flex flex-col items-start gap-0.5 min-w-0">
+            <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+              ภาคเรียนที่ใช้งาน
+            </span>
+            <button
+              type="button"
+              onClick={() => setActiveTab("database")}
+              className="text-sm font-bold text-blue-700 dark:text-blue-400 hover:underline cursor-pointer tabular-nums whitespace-nowrap"
+            >
+              {semesterDisplayLabel} / {academicSettings.academicYear}
+            </button>
+          </div>
+
+          <div className="lg:px-5 flex flex-col items-start gap-0.5 min-w-0">
+            <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+              ใบสอนแทนที่บันทึก
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                setDatabaseFocusTarget({
+                  subTab: "records",
+                  scrollToRecordsList: true,
+                  nonce: Date.now(),
+                });
+                setActiveTab("database");
+              }}
+              title="คลิกเพื่อดูรายการใบสอนแทนที่บันทึกไว้ทั้งหมด"
+              aria-label={`ดูรายการใบสอนแทนที่บันทึกไว้ทั้งหมด ${savedRecords.length} รายการ`}
+              className="text-sm font-bold text-blue-700 dark:text-blue-400 hover:underline cursor-pointer tabular-nums whitespace-nowrap text-left"
+            >
+              {savedRecords.length} รายการ
+            </button>
+          </div>
+
+          <div className="lg:pl-5 flex flex-col gap-0.5 min-w-0">
+            <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+              ผู้รับผิดชอบเอกสาร
+            </span>
+            <span className="text-sm font-semibold text-slate-800 dark:text-slate-200 truncate w-full">
+              {academicSettings.plannerName}
+            </span>
+          </div>
+        </section>
+
         {saveToastMessage && (
           <div
             role="status"
-            className="mb-3 px-4 py-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-400 dark:border-emerald-700 text-emerald-900 dark:text-emerald-200 text-sm font-bold flex items-center justify-between shadow-xs print:hidden"
+            className="px-4 py-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-200 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200 text-sm font-semibold flex items-center justify-between shadow-xs print:hidden"
           >
             <span>{saveToastMessage}</span>
             <button
               type="button"
               onClick={() => setSaveToastMessage("")}
-              className="text-xs font-semibold underline ml-3 cursor-pointer"
+              className="text-xs font-bold underline ml-3 cursor-pointer shrink-0"
             >
               ปิด
             </button>
@@ -1330,21 +1405,21 @@ export default function App() {
             onSaveSubjectMappings={handleSaveSubjectMappings}
             onResetSubjectMappings={handleResetSubjectMappings}
             onBulkRenameCourseCodes={handleBulkRenameCourseCodes}
+            focusTarget={databaseFocusTarget}
           />
         )}
       </main>
 
-      <footer className="mt-8 py-4 border-t border-[#c9d4ec] dark:border-[#2a3a6e] text-center text-xs text-[#51608a] dark:text-[#9fb0dc] print:hidden">
-        <p>
-          ระบบจัดสอนแทน โรงเรียนวรคุณอุปถัมภ์ ·{" "}
-          {academicSettings.semester === "ฤดูร้อน"
-            ? "ภาคฤดูร้อน"
-            : `ภาคเรียนที่ ${academicSettings.semester}`}{" "}
-          ปีการศึกษา {academicSettings.academicYear}
-        </p>
-        <p className="mt-0.5 font-medium text-[#1b4fb8] dark:text-[#6c97ff]">
-          พัฒนาโดย นักศึกษาฝึกวิชาชีพครู นายธีระพงษ์ หาวัน
-        </p>
+      <footer className="mt-auto py-4 px-4 border-t border-slate-200 dark:border-slate-800 bg-white/60 dark:bg-[#111827]/60 text-center text-xs text-slate-500 dark:text-slate-400 print:hidden">
+        <div className="max-w-[1400px] mx-auto flex flex-col sm:flex-row items-center justify-between gap-1.5">
+          <p>
+            ระบบจัดสอนแทน โรงเรียนวรคุณอุปถัมภ์ · {semesterDisplayLabel} ปีการศึกษา{" "}
+            {academicSettings.academicYear}
+          </p>
+          <p className="font-medium text-slate-600 dark:text-slate-300">
+            พัฒนาโดย นายธีระพงษ์ หาวัน
+          </p>
+        </div>
       </footer>
 
       {editorModalOpen && (

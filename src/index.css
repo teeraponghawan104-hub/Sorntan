@@ -50,13 +50,29 @@
 }
 
 @layer base {
+  :root {
+    color-scheme: light;
+  }
+
+  .dark {
+    color-scheme: dark;
+  }
+
   html,
   body {
-    font-family: "Sarabun", sans-serif;
+    font-family: "Plus Jakarta Sans", "Noto Sans Thai", system-ui, -apple-system, sans-serif;
     font-variant-numeric: tabular-nums;
     -webkit-text-size-adjust: 100%;
     text-size-adjust: 100%;
     -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  code,
+  kbd,
+  pre,
+  .font-mono {
+    font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
   }
 }
 
@@ -64,6 +80,39 @@
   font-family: "THSarabunNewWeb", "TH Sarabun PSK", "TH Sarabun New", sans-serif;
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
+}
+
+/* Subtle drafting studio backdrop behind A4 document preview */
+.studio-desk-bg {
+  background-color: #eef2f7;
+  background-image: radial-gradient(rgba(100, 116, 139, 0.22) 1px, transparent 1px);
+  background-size: 16px 16px;
+}
+
+.dark .studio-desk-bg {
+  background-color: #090e1a;
+  background-image: radial-gradient(rgba(148, 163, 184, 0.14) 1px, transparent 1px);
+  background-size: 16px 16px;
+}
+
+/* Hide scrollbars cleanly for horizontal nav/filter strips on narrow screens */
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+.no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 @media print {
@@ -74,5 +123,7 @@
   body {
     background: #ffffff !important;
   }
+  .studio-desk-bg {
+    background: #ffffff !important;
+  }
 }
-

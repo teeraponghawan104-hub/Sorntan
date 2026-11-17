@@ -279,22 +279,27 @@ export const TeacherEditorModal: React.FC<TeacherEditorModalProps> = ({
       role="dialog"
       aria-modal="true"
       aria-labelledby="modal-teacher-title"
-      className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 overflow-y-auto"
+      className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 overflow-y-auto"
     >
-      <div className="bg-white dark:bg-[#14204a] border border-[#c9d4ec] dark:border-[#2a3a6e] rounded-xl w-full max-w-4xl max-h-[92vh] flex flex-col shadow-xl overflow-hidden">
+      <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-slate-800 rounded-2xl w-full max-w-4xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden">
         {/* Header พร้อมปุ่มบันทึกด่วนด้านบน */}
-        <div className="flex items-center justify-between gap-2 px-4 py-3 sm:px-6 sm:py-3.5 bg-[#12307a] text-white border-b-2 border-[#f2c230] shrink-0">
-          <h3 id="modal-teacher-title" className="text-sm sm:text-lg font-bold truncate">
-            {isEditMode
-              ? `แก้ไขข้อมูลและตารางสอน: ${initialTeacher?.id} ${initialTeacher?.n}`
-              : "เพิ่มข้อมูลครู / นักศึกษาฝึกสอนใหม่ลงฐานข้อมูล"}
-          </h3>
+        <div className="flex items-center justify-between gap-2 px-4 py-3 sm:px-6 sm:py-4 bg-white dark:bg-[#111827] border-b border-slate-200 dark:border-slate-800 shrink-0">
+          <div className="min-w-0">
+            <h3 id="modal-teacher-title" className="text-sm sm:text-base font-bold text-slate-900 dark:text-slate-50 truncate">
+              {isEditMode
+                ? `แก้ไขข้อมูลและตารางสอน · ${initialTeacher?.id} ${initialTeacher?.n}`
+                : "เพิ่มข้อมูลครู / นักศึกษาฝึกสอนใหม่"}
+            </h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400 hidden sm:block">
+              กรอกข้อมูลพื้นฐานและตารางสอน 5 วัน × 7 คาบ (รองรับการวางจาก Excel)
+            </p>
+          </div>
           <div className="flex items-center gap-2 shrink-0">
             <button
               type="button"
               disabled={saving}
               onClick={() => void handleSubmit()}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-[#f2c230] hover:bg-[#e0b01e] text-[#0f2150] text-xs sm:text-sm font-bold shadow-xs disabled:opacity-50 cursor-pointer"
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg bg-blue-700 hover:bg-blue-800 text-white text-xs sm:text-sm font-semibold shadow-2xs disabled:opacity-50 cursor-pointer whitespace-nowrap"
             >
               {isEditMode ? <Save className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
               <span>{saving ? "กำลังบันทึก..." : isEditMode ? "บันทึกการแก้ไข" : "เพิ่มลงฐานข้อมูล"}</span>
@@ -303,7 +308,7 @@ export const TeacherEditorModal: React.FC<TeacherEditorModalProps> = ({
               type="button"
               onClick={onClose}
               aria-label="ปิดหน้าต่าง"
-              className="p-1.5 rounded-lg hover:bg-blue-800/60 text-white cursor-pointer"
+              className="p-1.5 rounded-lg text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
@@ -311,9 +316,9 @@ export const TeacherEditorModal: React.FC<TeacherEditorModalProps> = ({
         </div>
 
         {/* Body */}
-        <form onSubmit={handleSubmit} className="p-4 sm:p-6 overflow-y-auto space-y-4 flex-1">
+        <form onSubmit={handleSubmit} className="p-4 sm:p-6 overflow-y-auto space-y-5 flex-1">
           {errorMsg && (
-            <div className="p-3 rounded-lg bg-red-50 dark:bg-red-950/50 border border-red-300 dark:border-red-800 text-red-700 dark:text-red-300 text-sm font-semibold">
+            <div className="p-3 rounded-lg bg-red-50 dark:bg-red-950/50 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-300 text-sm font-semibold">
               {errorMsg}
             </div>
           )}
@@ -321,7 +326,7 @@ export const TeacherEditorModal: React.FC<TeacherEditorModalProps> = ({
           {/* ข้อมูลพื้นฐาน */}
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
             <div>
-              <label className="block text-xs font-bold text-[#0f2150] dark:text-[#e9eefc] mb-1">
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                 รหัสประจำตัว (เช่น 104, 309) *
               </label>
               <input
@@ -330,12 +335,12 @@ export const TeacherEditorModal: React.FC<TeacherEditorModalProps> = ({
                 disabled={isEditMode}
                 value={id}
                 onChange={(e) => setId(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg border border-[#c9d4ec] dark:border-[#2a3a6e] bg-white dark:bg-[#0b1330] disabled:opacity-60 text-sm font-semibold text-[#0f2150] dark:text-[#e9eefc]"
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 disabled:opacity-60 text-sm font-mono font-semibold text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600"
               />
             </div>
 
             <div className="sm:col-span-2">
-              <label className="block text-xs font-bold text-[#0f2150] dark:text-[#e9eefc] mb-1">
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                 ชื่อ - นามสกุล *
               </label>
               <input
@@ -344,12 +349,12 @@ export const TeacherEditorModal: React.FC<TeacherEditorModalProps> = ({
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="เช่น ครูสมชาย ใจดี หรือ นายธีระพงษ์ หวัน"
-                className="w-full px-3 py-2 rounded-lg border border-[#c9d4ec] dark:border-[#2a3a6e] bg-white dark:bg-[#0b1330] text-sm font-semibold text-[#0f2150] dark:text-[#e9eefc]"
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm font-semibold text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-[#0f2150] dark:text-[#e9eefc] mb-1">
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                 ประเภทบุคลากร *
               </label>
               <select
@@ -359,7 +364,7 @@ export const TeacherEditorModal: React.FC<TeacherEditorModalProps> = ({
                   setIsStudentTeacher(nextIsStudent);
                   syncSummaryWithGrid(grid, room, otherSummary, nextIsStudent);
                 }}
-                className="w-full px-3 py-2 rounded-lg border border-[#c9d4ec] dark:border-[#2a3a6e] bg-white dark:bg-[#0b1330] text-sm font-semibold text-[#0f2150] dark:text-[#e9eefc]"
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm font-semibold text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600"
               >
                 <option value="regular">ครูประจำการ / บริหาร</option>
                 <option value="student">นักศึกษาฝึกสอน</option>
@@ -369,7 +374,7 @@ export const TeacherEditorModal: React.FC<TeacherEditorModalProps> = ({
 
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
             <div>
-              <label className="block text-xs font-bold text-[#0f2150] dark:text-[#e9eefc] mb-1">
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                 กลุ่มสาระหลัก (สำหรับจับคู่สอนแทน)
               </label>
               <select
@@ -382,7 +387,7 @@ export const TeacherEditorModal: React.FC<TeacherEditorModalProps> = ({
                     syncSummaryWithGrid(grid, room, otherSummary, isStudentTeacher, nextG);
                   }
                 }}
-                className="w-full px-3 py-2 rounded-lg border border-[#c9d4ec] dark:border-[#2a3a6e] bg-white dark:bg-[#0b1330] text-sm text-[#0f2150] dark:text-[#e9eefc]"
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600"
               >
                 {DEFAULT_DEPARTMENTS.map((d) => (
                   <option key={d} value={d}>
@@ -393,7 +398,7 @@ export const TeacherEditorModal: React.FC<TeacherEditorModalProps> = ({
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-[#0f2150] dark:text-[#e9eefc] mb-1">
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                 กลุ่ม/ฝ่าย/งาน (บนหัวใบสอนแทน)
               </label>
               <input
@@ -401,12 +406,12 @@ export const TeacherEditorModal: React.FC<TeacherEditorModalProps> = ({
                 value={pdfGroup}
                 onChange={(e) => setPdfGroup(e.target.value)}
                 placeholder="เช่น ภาษาไทย, ฟิสิกส์, คอมพิวเตอร์"
-                className="w-full px-3 py-2 rounded-lg border border-[#c9d4ec] dark:border-[#2a3a6e] bg-white dark:bg-[#0b1330] text-sm text-[#0f2150] dark:text-[#e9eefc]"
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-[#0f2150] dark:text-[#e9eefc] mb-1">
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                 ห้องเรียนประจำ
               </label>
               <input
@@ -414,12 +419,12 @@ export const TeacherEditorModal: React.FC<TeacherEditorModalProps> = ({
                 value={room}
                 onChange={(e) => setRoom(e.target.value)}
                 placeholder="เช่น 138, 121, ห้องดนตรี"
-                className="w-full px-3 py-2 rounded-lg border border-[#c9d4ec] dark:border-[#2a3a6e] bg-white dark:bg-[#0b1330] text-sm text-[#0f2150] dark:text-[#e9eefc]"
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-[#0f2150] dark:text-[#e9eefc] mb-1">
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                 จำนวนชั่วโมงรวม/สัปดาห์
               </label>
               <input
@@ -428,36 +433,36 @@ export const TeacherEditorModal: React.FC<TeacherEditorModalProps> = ({
                 max={60}
                 value={totalHours}
                 onChange={(e) => setTotalHours(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg border border-[#c9d4ec] dark:border-[#2a3a6e] bg-white dark:bg-[#0b1330] text-sm text-[#0f2150] dark:text-[#e9eefc]"
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-sm font-mono text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600"
               />
             </div>
           </div>
 
           {/* ตารางสอน 5 วัน x 7 คาบ แบบแก้ไขรายช่อง + รองรับวางจาก Excel */}
-          <div className="border border-[#c9d4ec] dark:border-[#2a3a6e] rounded-xl p-3 sm:p-4 bg-[#f8faff] dark:bg-[#0b1330]/60">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-2">
+          <div className="border border-slate-200 dark:border-slate-800 rounded-xl p-3.5 sm:p-4 bg-slate-50/70 dark:bg-slate-900/50">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-3">
               <div>
-                <h4 className="text-sm font-bold text-[#0f2150] dark:text-[#e9eefc]">
-                  ตารางสอน 5 วัน × 7 คาบ (เว้นว่าง = ว่างพร้อมสอนแทน · รองรับก๊อปปี้จาก Excel มาวางได้)
+                <h4 className="text-sm font-bold text-slate-900 dark:text-slate-100">
+                  ตารางสอน 5 วัน × 7 คาบ (เว้นว่าง = ว่างพร้อมสอนแทน · วางจาก Excel ได้)
                 </h4>
-                <p className="text-xs text-[#51608a] dark:text-[#9fb0dc]">
-                  รูปแบบวิชา: <b>รหัสวิชา ชั้น</b> (เช่น <code>ท33102 6/1</code> หรือระบุห้อง{" "}
-                  <code>ว22104 2/1@201</code>) · เมื่อแก้ไขคาบ ระบบจะคำนวณชั่วโมงรวมและซิงก์กับตารางจัดสอนแทนอัตโนมัติ
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                  รูปแบบวิชา: <b>รหัสวิชา ชั้น</b> (เช่น <code className="text-blue-700 dark:text-blue-400">ท33102 6/1</code> หรือระบุห้อง{" "}
+                  <code className="text-blue-700 dark:text-blue-400">ว22104 2/1@201</code>)
                 </p>
               </div>
               <div className="flex flex-wrap items-center gap-1.5 shrink-0">
                 <button
                   type="button"
                   onClick={handleAutoSummarizeFromGrid}
-                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-[#0b7a4b] hover:bg-[#085c38] text-white text-xs font-bold cursor-pointer"
+                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-semibold cursor-pointer whitespace-nowrap"
                 >
                   <Wand2 className="w-3.5 h-3.5" />
-                  <span>คำนวณชั่วโมง & สรุปวิชาอัตโนมัติ</span>
+                  <span>สรุปชั่วโมงอัตโนมัติ</span>
                 </button>
                 <button
                   type="button"
                   onClick={handleClearAcademicClassesOnly}
-                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-[#c9d4ec] dark:border-[#2a3a6e] bg-white dark:bg-[#14204a] text-[#51608a] dark:text-[#9fb0dc] hover:text-red-600 text-xs font-semibold cursor-pointer"
+                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:text-red-600 text-xs font-semibold cursor-pointer whitespace-nowrap"
                 >
                   <RotateCcw className="w-3.5 h-3.5" />
                   <span>ล้างวิชาเพื่อจัดเทอมใหม่</span>
@@ -467,7 +472,7 @@ export const TeacherEditorModal: React.FC<TeacherEditorModalProps> = ({
 
             {/* ปุ่มลัดใส่ค่าในช่องที่กำลังเลือก */}
             <div className="flex flex-wrap items-center gap-1.5 mb-3">
-              <span className="text-xs font-semibold text-[#51608a] dark:text-[#9fb0dc]">
+              <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
                 {activeCell
                   ? `ปุ่มลัดสำหรับ วัน${DAYS[activeCell.day]} คาบ ${activeCell.period + 1}:`
                   : "คลิกเลือกช่องคาบเรียนแล้วกดปุ่มลัด:"}
@@ -478,7 +483,7 @@ export const TeacherEditorModal: React.FC<TeacherEditorModalProps> = ({
                   type="button"
                   disabled={!activeCell}
                   onClick={() => applyQuickTagToActiveCell(tag.value)}
-                  className="px-2 py-1 rounded text-xs font-semibold bg-white dark:bg-[#14204a] border border-[#c9d4ec] dark:border-[#2a3a6e] text-[#0f2150] dark:text-[#e9eefc] hover:bg-[#1b4fb8] hover:text-white disabled:opacity-40 cursor-pointer transition-colors"
+                  className="px-2 py-1 rounded-md text-xs font-medium bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-blue-700 hover:text-white hover:border-blue-700 disabled:opacity-40 cursor-pointer transition-colors"
                 >
                   {tag.label}
                 </button>
@@ -487,7 +492,7 @@ export const TeacherEditorModal: React.FC<TeacherEditorModalProps> = ({
 
             {/* แจ้งเตือนตรวจสอบรูปแบบข้อความในช่องตารางสอน 5x7 แบบเรียลไทม์ */}
             {scheduleIssues.length > 0 && (
-              <div className="mb-3 p-2.5 rounded-lg bg-amber-50 dark:bg-amber-950/60 border border-amber-300 dark:border-amber-700 text-xs space-y-1.5">
+              <div className="mb-3 p-3 rounded-lg bg-amber-50 dark:bg-amber-950/50 border border-amber-200 dark:border-amber-800 text-xs space-y-1.5">
                 <div className="flex items-center justify-between gap-2 flex-wrap">
                   <div className="flex items-center gap-1.5 font-bold text-amber-900 dark:text-amber-200">
                     <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 shrink-0" />
@@ -499,10 +504,10 @@ export const TeacherEditorModal: React.FC<TeacherEditorModalProps> = ({
                     <button
                       type="button"
                       onClick={handleAutoFixGridFormat}
-                      className="flex items-center gap-1 px-2.5 py-1 rounded-md bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs cursor-pointer shadow-2xs"
+                      className="flex items-center gap-1 px-2.5 py-1 rounded-md bg-amber-600 hover:bg-amber-700 text-white font-semibold text-xs cursor-pointer"
                     >
                       <Check className="w-3.5 h-3.5" />
-                      <span>จัดรูปแบบให้ถูกต้องอัตโนมัติ</span>
+                      <span>จัดรูปแบบอัตโนมัติ</span>
                     </button>
                   )}
                 </div>
@@ -526,7 +531,7 @@ export const TeacherEditorModal: React.FC<TeacherEditorModalProps> = ({
                               iss.suggestedValue || iss.rawValue
                             )
                           }
-                          className="px-2 py-0.5 rounded bg-white dark:bg-[#14204a] border border-amber-400 dark:border-amber-700 text-amber-900 dark:text-amber-200 font-semibold hover:bg-amber-100 cursor-pointer"
+                          className="px-2 py-0.5 rounded bg-white dark:bg-slate-800 border border-amber-300 dark:border-amber-700 text-amber-900 dark:text-amber-200 font-semibold hover:bg-amber-100 cursor-pointer"
                         >
                           แก้เป็น &ldquo;{iss.suggestedValue}&rdquo;
                         </button>
@@ -537,28 +542,32 @@ export const TeacherEditorModal: React.FC<TeacherEditorModalProps> = ({
               </div>
             )}
 
-            <div className="overflow-x-auto">
+            <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
               <table className="w-full min-w-[720px] border-collapse text-xs">
                 <thead>
-                  <tr className="bg-[#eaf0fa] dark:bg-[#14204a] text-[#0f2150] dark:text-[#e9eefc]">
-                    <th className="border border-[#c9d4ec] dark:border-[#2a3a6e] p-1.5 w-20">
+                  <tr className="bg-slate-100/80 dark:bg-slate-800 text-slate-700 dark:text-slate-200">
+                    <th className="border-b border-r border-slate-200 dark:border-slate-700 p-2 w-20">
                       วัน / คาบ
                     </th>
                     {PERIOD_TIMES.map((tm, idx) => (
                       <th
                         key={tm}
-                        className="border border-[#c9d4ec] dark:border-[#2a3a6e] p-1.5 text-center"
+                        className={`border-b ${
+                          idx < 6 ? "border-r" : ""
+                        } border-slate-200 dark:border-slate-700 p-1.5 text-center`}
                       >
                         <div>คาบ {idx + 1}</div>
-                        <div className="text-[10px] font-normal opacity-80">{tm}</div>
+                        <div className="text-[10px] font-normal text-slate-500 dark:text-slate-400 tabular-nums">
+                          {tm}
+                        </div>
                       </th>
                     ))}
                   </tr>
                 </thead>
-                <tbody>
+                <tbody className="divide-y divide-slate-200 dark:divide-slate-700">
                   {DAYS.map((dayName, dIdx) => (
                     <tr key={dayName}>
-                      <td className="border border-[#c9d4ec] dark:border-[#2a3a6e] p-1.5 font-bold text-center bg-[#eaf0fa]/50 dark:bg-[#14204a]/50">
+                      <td className="border-r border-slate-200 dark:border-slate-700 p-1.5 font-bold text-center bg-slate-50 dark:bg-slate-800/50 text-slate-700 dark:text-slate-200">
                         {dayName}
                       </td>
                       {PERIOD_TIMES.map((_, pIdx) => {
@@ -571,11 +580,13 @@ export const TeacherEditorModal: React.FC<TeacherEditorModalProps> = ({
                         return (
                           <td
                             key={pIdx}
-                            className={`border border-[#c9d4ec] dark:border-[#2a3a6e] p-1 ${
+                            className={`${
+                              pIdx < 6 ? "border-r border-slate-200 dark:border-slate-700" : ""
+                            } p-1 ${
                               isFocused
-                                ? "ring-2 ring-[#f2c230] bg-amber-50/30"
+                                ? "ring-2 ring-inset ring-blue-600 bg-blue-50/40 dark:bg-blue-950/30"
                                 : cellIssue
-                                ? "bg-amber-100/70 dark:bg-amber-950/50"
+                                ? "bg-amber-50 dark:bg-amber-950/40"
                                 : ""
                             }`}
                           >
@@ -589,10 +600,10 @@ export const TeacherEditorModal: React.FC<TeacherEditorModalProps> = ({
                               placeholder="ว่าง"
                               title={cellIssue ? cellIssue.message : undefined}
                               aria-label={`วัน${dayName} คาบที่ ${pIdx + 1}`}
-                              className={`w-full px-1.5 py-1 rounded bg-white dark:bg-[#0b1330] text-[#0f2150] dark:text-[#e9eefc] text-xs border focus:outline-none ${
+                              className={`w-full px-1.5 py-1.5 rounded bg-transparent text-slate-900 dark:text-slate-100 text-xs border focus:outline-none ${
                                 cellIssue
-                                  ? "border-amber-500 dark:border-amber-500 text-amber-900 dark:text-amber-200 font-semibold"
-                                  : "border-transparent focus:border-[#1b4fb8]"
+                                  ? "border-amber-500 text-amber-900 dark:text-amber-200 font-semibold"
+                                  : "border-transparent focus:bg-white dark:focus:bg-slate-800"
                               }`}
                             />
                           </td>
@@ -608,7 +619,7 @@ export const TeacherEditorModal: React.FC<TeacherEditorModalProps> = ({
           {/* รายวิชาที่สอน & กิจกรรมอื่นๆ */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div>
-              <label className="block text-xs font-bold text-[#0f2150] dark:text-[#e9eefc] mb-1">
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                 สรุปรายวิชาที่สอน (ซิงก์อัตโนมัติกับตาราง 5×7 และฐานข้อมูลรหัสวิชา)
               </label>
               <textarea
@@ -616,12 +627,12 @@ export const TeacherEditorModal: React.FC<TeacherEditorModalProps> = ({
                 value={coursesText}
                 onChange={(e) => setCoursesText(e.target.value)}
                 placeholder={"เช่น 1) ท22102 (ภาษาไทย) 2/1 [3], 2/2 [3]\n2) ท32102 (ภาษาไทย) 5/1 [2]"}
-                className="w-full px-3 py-2 rounded-lg border border-[#c9d4ec] dark:border-[#2a3a6e] bg-white dark:bg-[#0b1330] text-xs text-[#0f2150] dark:text-[#e9eefc]"
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-[#0f2150] dark:text-[#e9eefc] mb-1">
+              <label className="block text-xs font-semibold text-slate-700 dark:text-slate-300 mb-1">
                 กิจกรรมอื่นๆ ท้ายตาราง
               </label>
               <textarea
@@ -632,22 +643,22 @@ export const TeacherEditorModal: React.FC<TeacherEditorModalProps> = ({
                   setOtherSummary(nextOther);
                   syncSummaryWithGrid(grid, room, nextOther, isStudentTeacher);
                 }}
-                className="w-full px-3 py-2 rounded-lg border border-[#c9d4ec] dark:border-[#2a3a6e] bg-white dark:bg-[#0b1330] text-xs text-[#0f2150] dark:text-[#e9eefc]"
+                className="w-full px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600"
               />
             </div>
           </div>
         </form>
 
-        {/* Sticky Footer Buttons ด้านล่างที่มองเห็นตลอดเวลาโดยไม่ต้องเลื่อนจอ */}
-        <div className="flex items-center justify-between gap-2 px-4 py-3 sm:px-6 bg-[#f8faff] dark:bg-[#0b1330] border-t border-[#c9d4ec] dark:border-[#2a3a6e] shrink-0">
-          <span className="text-xs text-[#51608a] dark:text-[#9fb0dc] hidden sm:inline">
-            ข้อมูลที่บันทึกจะซิงก์ไปยังหน้าจัดสอนแทน ตารางสอน เช็คครูว่าง และฐานข้อมูลทันที
+        {/* Sticky Footer Buttons ด้านล่าง */}
+        <div className="flex items-center justify-between gap-2 px-4 py-3 sm:px-6 bg-slate-50 dark:bg-slate-900/80 border-t border-slate-200 dark:border-slate-800 shrink-0">
+          <span className="text-xs text-slate-500 dark:text-slate-400 hidden sm:inline">
+            ข้อมูลที่บันทึกจะซิงก์ไปยังทุกหน้าจออัตโนมัติ
           </span>
           <div className="flex items-center justify-end gap-2 ml-auto">
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 rounded-lg border border-[#c9d4ec] dark:border-[#2a3a6e] text-sm font-semibold text-[#0f2150] dark:text-[#e9eefc] hover:bg-slate-100 dark:hover:bg-blue-950 cursor-pointer"
+              className="px-4 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-sm font-semibold text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 cursor-pointer"
             >
               ยกเลิก
             </button>
@@ -655,7 +666,7 @@ export const TeacherEditorModal: React.FC<TeacherEditorModalProps> = ({
               type="button"
               disabled={saving}
               onClick={() => void handleSubmit()}
-              className="flex items-center gap-1.5 px-5 py-2 rounded-lg bg-[#1b4fb8] hover:bg-[#153e91] text-white text-sm font-bold shadow-xs disabled:opacity-50 cursor-pointer"
+              className="flex items-center gap-1.5 px-5 py-2 rounded-lg bg-blue-700 hover:bg-blue-800 text-white text-sm font-semibold shadow-2xs disabled:opacity-50 cursor-pointer"
             >
               {isEditMode ? <Save className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
               <span>{saving ? "กำลังบันทึก..." : isEditMode ? "บันทึกการแก้ไข" : "เพิ่มลงฐานข้อมูล"}</span>
